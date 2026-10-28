@@ -7,7 +7,7 @@ account on a machine that is always on.
 
 This is the tooling behind haku's fleet (haku767/fleet is its register and plans), pulled
 out so that it pays for that fleet first and for the next person second. Status, 2026-10-28:
-stage 2 of fleet PLANS 13, `fleet check` works, `render` is next. Nothing here is needed to
+stage 2 of fleet PLANS 13, `fleet check`, `fleet render` and `fleet apply conf` work; the scripts that read the files are ws-guard's next step. Nothing here is needed to
 run a fleet yet; the scripts a fleet runs on (`bot-round`, `bot-review`, the install
 scripts) still live in haku's dotfiles and will read what this tool renders.
 
@@ -25,8 +25,8 @@ haku767/fleet.
 | Command | State | What it does |
 |---|---|---|
 | `fleet check [fleet.toml]` | works | validates the file: every bot has a project and a stack, names and accounts unique, repositories well-formed, no secret in the file; exit 1 on an error |
-| `fleet render` | next | the derived files: `/etc/fleet/bots/<bot>.conf` per bot (what the rounds read), the account and courier lists, the page's tables, the house rules' project table |
-| `fleet apply conf` | next | writes the rendered `.conf` files (sudo) |
+| `fleet render [--out DIR] [--bot NAME] [fleet.toml]` | works | the derived files into `rendered/`: `bots/<account>.conf` per bot, named after the Unix account (what `bot-round` and `bot-review` source in place of their `case` blocks, the same variable names), `machines/<m>/lists.sh` (the install scripts' account lists), `machines/<m>/courier.sh`, `tables.json` (the page's tables), `rules-table.md` (the house rules' project table); `--bot` prints one `.conf` |
+| `fleet apply conf [--dir D] [--dry-run] [fleet.toml]` | works | writes the rendered `bots/<account>.conf` into `/etc/fleet/bots` (sudo; `--dir` for a trial), atomically, 0644, and removes a file there that the render no longer has and that carries the generated header; prints added, changed, removed |
 | `fleet apply`, `doctor`, `add-project`, `add-bot`, `labels`, `ruleset`, `status`, `page` | planned | fleet PLANS 13, stage 3 |
 
 Python 3.11 or newer, standard library only. To try it without installing:
@@ -38,6 +38,7 @@ or `pip install -e .` for the `fleet` command. Tests: `python3 -m unittest disco
 ## Layout
 
 - `src/fleet_kit/model.py`: loads the file, the checks.
+- `src/fleet_kit/render.py`: what the tool derives (its docstring lists the files).
 - `src/fleet_kit/cli.py`: the command.
 - `examples/minimal.toml`: the smallest fleet.
 - `tests/`: unittest, no fixtures beyond the example.
