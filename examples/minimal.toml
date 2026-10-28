@@ -1,0 +1,24 @@
+# The smallest fleet: one machine, one project, a plan bot and a dev bot. No courier, no
+# guard; `fleet doctor` by hand replaces the guard at first. Facts only, never a key or a token.
+
+[fleet]
+name = "erik"
+owner = "ErikNeu777"                 # merges, sets ready anywhere, decides
+
+[machines.box]
+role = "bots"
+family = "arch"                      # arch | nixos
+home_root = "/srv"
+scratch_root = "/data"
+
+[stacks.python-uv]
+test = "uv sync; uv run ruff check; uv run pytest"
+allow = ["uv sync*", "uv lock*", "uv run ruff *", "uv run pytest*"]
+env = { UV_CACHE_DIR = "{scratch}/uv-cache", UV_LINK_MODE = "copy" }
+
+[projects.myapp]
+repo = "ErikNeu777/myapp"
+stacks = ["python-uv"]
+ci = "auto"                          # yes | no | auto: auto looks for .github/workflows
+plan = { name = "myapp-plan" }
+dev  = { name = "myapp-dev" }
