@@ -2,8 +2,10 @@
 
 `render(doc)` returns {relative path: text}; the command writes them under --out. The files:
 
-- `bots/<bot>.conf`: one per project bot, POSIX sh, sourced by bot-round (kind=dev) and
-  bot-review (kind=plan) in place of their case blocks; the same variable names as those.
+- `bots/<account>.conf`: one per project bot, named after its Unix account (what a script
+  knows as `$me`; `name=` inside is the register name), POSIX sh, sourced by bot-round
+  (kind=dev) and bot-review (kind=plan) in place of their case blocks; the same variable
+  names as those.
 - `machines/<machine>/lists.sh`: the account lists the install scripts hold (`bots`, `ssh_bots`,
   `round_bots`, `review_bots`, `paused_bots`) for every machine with role bots.
 - `machines/<machine>/courier.sh`: the courier's lists (`to_bots`, `from_bots`) for a machine
@@ -23,7 +25,7 @@ CI_SENTENCE = {
     "auto": "While the repository has no CI, write into the pull request body which checks you ran and that they passed",
     "yes": None,
 }
-HEADER = "# /etc/fleet/bots/{name}.conf: written by `fleet apply conf` from fleet.toml ({fleet}); do not edit\n"
+HEADER = "# /etc/fleet/bots/{account}.conf: written by `fleet apply conf` from fleet.toml ({fleet}); do not edit\n"
 
 
 def q(s):
@@ -150,7 +152,7 @@ class Fleet:
 def conf(fl, pname, p, kind, b, account, machine):
     repo = p.get("repo", "")
     home, _ = fl.paths(machine, account)
-    lines = [HEADER.format(name=b["name"], fleet=fl.fleet.get("name", "")).rstrip("\n")]
+    lines = [HEADER.format(account=account, fleet=fl.fleet.get("name", "")).rstrip("\n")]
     common = [("kind", kind), ("project", pname), ("name", b["name"]), ("account", account),
               ("machine", machine or ""), ("paused", "yes" if p.get("paused") else "no"), ("repo", repo),
               ("dir", f"{home}/{repo.rsplit('/', 1)[-1]}")]
@@ -236,8 +238,41 @@ def render(doc):
     fl = Fleet(doc)
     out = {}
     for pname, p, kind, b, account, machine in fl.bots():
-        out[f"bots/{b['name']}.conf"] = conf(fl, pname, p, kind, b, account, machine)
+        out[f"bots/{account}.conf"] = conf(fl, pname, p, kind, b, account, machine)
     out.update(lists(fl))
     out["tables.json"] = tables(fl)
     out["rules-table.md"] = rules_table(fl)
     return out
+
+
+def apply_conf(files, directory, dry_run=False):
+    """Puts the rendered bots/*.conf into `directory` (0755, files 0644), removes a .conf there
+    that the render no longer has and that carries the header (never a hand-written file).
+    Returns the list of (action, path): added, changed, removed, kept."""
+    import os
+    import tempfile
+    wanted = {rel.split("/", 1)[1]: text for rel, text in files.items() if rel.startswith("bots/")}
+    actions = []
+    if not dry_run:
+        os.makedirs(directory, mode=0o755, exist_ok=True)
+    present = set(os.listdir(directory)) if os.path.isdir(directory) else set()
+    for fname, text in wanted.items():
+        path = os.path.join(directory, fname)
+        old = open(path).read() if fname in present else None
+        if old == text:
+            actions.append(("kept", path))
+            continue
+        actions.append(("added" if old is None else "changed", path))
+        if not dry_run:
+            fd, tmp = tempfile.mkstemp(dir=directory, prefix=".fleet-")
+            with os.fdopen(fd, "w") as f:
+                f.write(text)
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, path)
+    for fname in sorted(present - set(wanted)):
+        path = os.path.join(directory, fname)
+        if fname.endswith(".conf") and os.path.isfile(path) and "written by `fleet apply conf`" in open(path).readline():
+            actions.append(("removed", path))
+            if not dry_run:
+                os.remove(path)
+    return actions
