@@ -30,7 +30,9 @@ haku767/fleet.
 | `fleet apply lists [--machine M] [--dir D] [--dry-run] [fleet.toml]` | works | writes this host's `machines/<host>/lists.sh` as `/etc/fleet/lists.sh` (a bots machine: the install scripts' account lists) and `courier.sh` as `/etc/fleet/courier.sh` (a machine with a courier), sudo, same rules as `apply conf`; the host is `uname -n` unless `--machine` says otherwise |
 | `fleet labels <project>\|all [--apply] [-v] [fleet.toml]` | works | compares a project's repository with the fleet's labels (`[labels]` in the file, or the kit's defaults: `ready`, `needs-haku`, `next`, `live`, `size:S/M/L`, one `bot:<name>` per bot; `{owner}`, `{plan}`, `{dev}` in a description are filled in per project) and lists what to create or change; `--apply` writes it through `gh api` as whoever runs it (write access to the repository). Other labels are left alone, nothing is deleted |
 | `fleet ruleset <project>\|all [--apply] [fleet.toml]` | works | a project with `reviews = N` wants the ruleset `main-rule` on its default branch: no deletion, no force push, a pull request with N approving reviews; the command shows the differences, `--apply` creates or updates it (admin rights: the owner, not a bot). Without `reviews` it only reports what the repository has |
-| `fleet apply` (accounts, units), `doctor`, `add-project`, `add-bot`, `status`, `page` | planned | fleet PLANS 13, stage 3 |
+| `fleet add-project <name> --repo O/R --stack S [--test CMD] [--ci ...] [--reviews N] [--plan NAME] [--dev NAME] [--no-plan] [--no-dev] [--machine M] [--paused] [fleet.toml]` | works | appends `[projects.<name>]` with its plan and dev bot (default `<name>-plan`, `<name>-dev`) before the guards, checks the result and writes only when it is clean; then prints what is still by hand: the Apps with their permissions and installation, labels, ruleset, the accounts and keys on the machine, the first round |
+| `fleet add-bot <project> plan\|dev [--name N] [--account A] [--persona P] [--machine M] [fleet.toml]` | works | adds the one bot line to the project's block, same check and the same steps for that bot |
+| `fleet apply` (accounts, units), `doctor`, `status`, `page` | planned | fleet PLANS 13, stage 3 |
 
 Python 3.11 or newer, standard library only. To try it without installing:
 
@@ -41,6 +43,7 @@ or `pip install -e .` for the `fleet` command. Tests: `python3 -m unittest disco
 ## Layout
 
 - `src/fleet_kit/model.py`: loads the file, the checks.
+- `src/fleet_kit/edit.py`: `add-project` and `add-bot` (text insertion, the file keeps its comments; the GitHub steps).
 - `src/fleet_kit/labels.py`, `ruleset.py`: what a repository should have, the comparison, the writes; `github.py` runs `gh api`.
 - `src/fleet_kit/render.py`: what the tool derives (its docstring lists the files).
 - `src/fleet_kit/cli.py`: the command.

@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 
-from . import __version__, labels, model, render, ruleset
+from . import __version__, edit, labels, model, render, ruleset
 from .github import GH, GHError
 
 DEFAULT_CONF_DIR = "/etc/fleet/bots"
@@ -203,6 +203,103 @@ def cmd_ruleset(args):
     return 1 if failed else 0
 
 
+def read_for_edit(file, cmd):
+    """Text and document of a file about to be appended to; None after printing what is wrong."""
+    try:
+        text, doc = model.load(file)
+    except FileNotFoundError:
+        print(f"fleet {cmd}: {file}: no such file", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"fleet {cmd}: {file}: {e}", file=sys.stderr)
+        return None
+    if any(x.level == "error" for x in model.check(text, doc)):
+        print(f"fleet {cmd}: {file} has errors already, run fleet check first", file=sys.stderr)
+        return None
+    return text, doc
+
+
+def finish_edit(args, text, doc_before, cmd, what, pname, kinds, machine):
+    findings = edit.write_checked(args.file, text, cmd)
+    for x in findings:
+        print(x, file=sys.stderr)
+    if any(x.level == "error" for x in findings):
+        print(f"fleet {cmd}: that would leave {args.file} with errors; nothing written", file=sys.stderr)
+        return 1
+    print(f"fleet {cmd}: {what} in {args.file}")
+    _, doc = model.load(args.file)
+    print()
+    print("\n".join(edit.github_steps(doc, pname, kinds, machine)))
+    return 0
+
+
+def default_machine(doc, wanted=None):
+    machines = doc.get("machines") or {}
+    if wanted:
+        return wanted
+    bots = [m for m, v in machines.items() if v.get("role") == "bots"]
+    return bots[0] if len(bots) == 1 else None
+
+
+def cmd_add_project(args):
+    loaded = read_for_edit(args.file, "add-project")
+    if loaded is None:
+        return 1
+    text, doc = loaded
+    name = args.name
+    if name in (doc.get("projects") or {}):
+        print(f"fleet add-project: {name} is in the file already", file=sys.stderr)
+        return 1
+    if not model.ACCOUNT.match(name):
+        print("fleet add-project: the name must be lowercase letters, digits, - or _ (it names the bots' accounts)", file=sys.stderr)
+        return 1
+    if not args.stack and not args.test:
+        print("fleet add-project: --stack <stack> (from [stacks]) or --test <command> is required", file=sys.stderr)
+        return 1
+    machine = default_machine(doc, args.machine)
+    if machine is None and (not args.no_plan or not args.no_dev):
+        print("fleet add-project: several machines have role bots; --machine names one", file=sys.stderr)
+        return 1
+    fields = {"repo": args.repo, "stacks": args.stack or None, "test": args.test, "ci": args.ci,
+              "reviews": args.reviews, "machine": args.machine, "paused": True if args.paused else None}
+    kinds = []
+    if not args.no_plan:
+        fields["plan"] = {"name": args.plan or f"{name}-plan"}
+        kinds.append("plan")
+    if not args.no_dev:
+        fields["dev"] = {"name": args.dev or f"{name}-dev"}
+        kinds.append("dev")
+    block = edit.project_block(name, fields)
+    bots = ", ".join(fields[k]["name"] for k in kinds)
+    what = f"appended [projects.{name}] ({args.repo}" + (f", bots {bots}" if bots else ", no bots") + ")"
+    return finish_edit(args, edit.insert_project(text, block), doc, "add-project", what, name, kinds, machine)
+
+
+def cmd_add_bot(args):
+    loaded = read_for_edit(args.file, "add-bot")
+    if loaded is None:
+        return 1
+    text, doc = loaded
+    p = (doc.get("projects") or {}).get(args.project)
+    if p is None:
+        print(f"fleet add-bot: no project {args.project} in the file", file=sys.stderr)
+        return 1
+    if args.kind in p:
+        print(f"fleet add-bot: {args.project} has a {args.kind} bot already ({p[args.kind].get('name')})", file=sys.stderr)
+        return 1
+    machine = default_machine(doc, args.machine or p.get("machine"))
+    if machine is None:
+        print("fleet add-bot: several machines have role bots; --machine names one", file=sys.stderr)
+        return 1
+    spec = {"name": args.name or f"{args.project}-{args.kind}"}
+    for k in ("account", "persona", "machine"):
+        if getattr(args, k):
+            spec[k] = getattr(args, k)
+    what = f"added {args.kind} = {edit.toml_value(spec)} to [projects.{args.project}]"
+    return finish_edit(args, edit.insert_bot(text, args.project, args.kind, spec), doc, "add-bot", what,
+                       args.project, [args.kind], machine)
+
+
 def cmd_later(args):
     print(f"fleet {args.command}: {NEXT}", file=sys.stderr)
     return 2
@@ -237,8 +334,31 @@ def main(argv=None):
         g.add_argument("--apply", action="store_true", help="write to GitHub; without it the command only compares")
         g.add_argument("-v", "--verbose", action="store_true", help="list the repository's other labels too")
         g.set_defaults(func=fn)
+    ap_ = sub.add_parser("add-project", help="append a project (and its two bots) to the file; prints what GitHub and the machine need")
+    ap_.add_argument("name", help="the project's name (lowercase; the bots default to <name>-plan and <name>-dev)")
+    ap_.add_argument("--repo", required=True, help="owner/name on GitHub")
+    ap_.add_argument("--stack", action="append", help="a stack from [stacks]; repeat for several")
+    ap_.add_argument("--test", help="the project's own test command, in place of or besides the stacks'")
+    ap_.add_argument("--ci", choices=model.CI, help="yes | no | auto")
+    ap_.add_argument("--reviews", type=int, help="approving reviews the default branch's ruleset asks for (fleet ruleset)")
+    ap_.add_argument("--plan", metavar="NAME", help="the plan bot's name")
+    ap_.add_argument("--dev", metavar="NAME", help="the dev bot's name")
+    ap_.add_argument("--no-plan", action="store_true", help="no plan bot")
+    ap_.add_argument("--no-dev", action="store_true", help="no dev bot")
+    ap_.add_argument("--machine", help="the bots' machine when several have role bots")
+    ap_.add_argument("--paused", action="store_true", help="start paused (no rounds)")
+    ap_.add_argument("file", nargs="?", default="fleet.toml")
+    ap_.set_defaults(func=cmd_add_project)
+    ab = sub.add_parser("add-bot", help="append a plan or dev bot to a project in the file; prints what GitHub and the machine need")
+    ab.add_argument("project")
+    ab.add_argument("kind", choices=("plan", "dev"))
+    ab.add_argument("--name", help="the bot's name (default <project>-<kind>)")
+    ab.add_argument("--account", help="the Unix account when it differs from the name")
+    ab.add_argument("--persona", help="the page's persona")
+    ab.add_argument("--machine", help="the bot's machine when several have role bots")
+    ab.add_argument("file", nargs="?", default="fleet.toml")
+    ab.set_defaults(func=cmd_add_bot)
     for name, help_ in (("doctor", "what is wrong on this machine and on GitHub"), ("status", "the page's lists in the terminal"),
-                        ("add-project", "append a project"), ("add-bot", "append a bot"),
                         ("page", "install collector and page")):
         p = sub.add_parser(name, help=f"{help_} ({NEXT.split(':')[0]})")
         p.add_argument("rest", nargs=argparse.REMAINDER)
