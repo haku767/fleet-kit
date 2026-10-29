@@ -16,6 +16,9 @@ test = "uv sync; uv run ruff check; uv run pytest"
 allow = ["uv sync*", "uv lock*", "uv run ruff *", "uv run pytest*"]
 env = { UV_CACHE_DIR = "{scratch}/uv-cache", UV_LINK_MODE = "copy" }
 
+# No [labels] table: `fleet labels myapp` uses the kit's defaults (ready, needs-haku, next, live,
+# size:S/M/L, bot:<name>). `reviews = 1` would ask for a ruleset on main (`fleet ruleset myapp`).
+
 [projects.myapp]
 repo = "ErikNeu777/myapp"
 stacks = ["python-uv"]

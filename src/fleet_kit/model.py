@@ -15,6 +15,7 @@ PEOPLE_ROLES = ("owner", "member", "tester")
 REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$")
 LOGIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 ACCOUNT = re.compile(r"^[a-z_][a-z0-9_-]*$")
+COLOR = re.compile(r"^[0-9a-fA-F]{6}$")
 
 # What a secret looks like when it ends up in the file by mistake: GitHub tokens of every kind,
 # an Anthropic key, a PEM block, a long hex or base64 run. Facts only, never a key.
@@ -24,17 +25,19 @@ SECRET = re.compile(
 )
 
 KEYS = {
-    "fleet": {"name", "owner", "agents_dir", "labels", "bot_label", "trailers", "rules"},
+    "fleet": {"name", "owner", "agents_dir", "trailers", "rules"},
     "defaults.round": {"every", "max_worktrees", "max_turns", "budget_usd", "model_small", "model_large"},
     "defaults.review": {"every", "max_per_pr", "max_turns"},
     "defaults.page": {"budget_dev_usd", "budget_plan_usd", "collect_every"},
     "machine": {"role", "family", "home_root", "scratch_root", "page", "guard", "courier"},
     "stack": {"test", "allow", "env", "note"},
     "project": {"repo", "stacks", "test", "test_extra", "test_note", "ci", "ci_note", "ci_checks", "review_note",
-                "allow_extra", "env", "runner", "reads", "deploy", "paused", "owner_app", "ready_also", "plan", "dev", "machine"},
+                "allow_extra", "env", "runner", "reads", "deploy", "paused", "owner_app", "ready_also", "plan", "dev", "machine",
+                "reviews"},
     "bot": {"name", "account", "app", "persona", "budget_usd", "machine"},
     "guard": {"machine", "project", "persona", "apps"},
     "person": {"role", "projects"},
+    "label": {"color", "description"},
 }
 
 
@@ -106,13 +109,37 @@ def check(text, doc):
     if not isinstance(fleet, dict):
         err("fleet", "missing [fleet] table")
         fleet = {}
-    keys("fleet", fleet, KEYS["fleet"])
+    keys("fleet", {k: v for k, v in fleet.items() if k not in ("labels", "bot_label")}, KEYS["fleet"])
     owner = fleet.get("owner")
     if not isinstance(owner, str) or not LOGIN.match(owner):
         err("fleet.owner", "a GitHub login is required")
         owner = None
     if not isinstance(fleet.get("name"), str):
         err("fleet.name", "a name is required")
+    for k in ("labels", "bot_label"):
+        if k in fleet:
+            warn(f"fleet.{k}", "moved to the [labels] table (one entry per label with color and description); ignored")
+
+    labels = doc.get("labels")
+    if labels is not None:
+        if not isinstance(labels, dict) or not labels:
+            err("labels", "must be a table with one entry per label")
+            labels = {}
+        bot_labels = [n for n in labels if "{name}" in n]
+        if len(bot_labels) > 1:
+            err("labels", f"only one label may hold {{name}} (the bot label): {', '.join(bot_labels)}")
+        for lname, spec in labels.items():
+            w = f"labels.{lname}"
+            if not isinstance(spec, dict):
+                err(w, "must be a table with color and description")
+                continue
+            keys(w, spec, KEYS["label"])
+            if not isinstance(spec.get("color"), str) or not COLOR.match(spec["color"]):
+                err(w, "color must be six hex digits")
+            if "description" in spec and not isinstance(spec["description"], str):
+                err(w, "description must be a string")
+            elif len(spec.get("description", "")) > 100:
+                err(w, "description longer than GitHub's 100 characters")
 
     for d, allowed in (("round", KEYS["defaults.round"]), ("review", KEYS["defaults.review"]), ("page", KEYS["defaults.page"])):
         t = (doc.get("defaults") or {}).get(d)
@@ -191,6 +218,8 @@ def check(text, doc):
                 err(w, f"ready_also holds `{login}`, not a login")
         if "paused" in p and not isinstance(p["paused"], bool):
             err(w, "paused must be true or false")
+        if "reviews" in p and (isinstance(p["reviews"], bool) or not isinstance(p["reviews"], int) or p["reviews"] < 0):
+            err(w, "reviews must be a whole number: approving reviews the default branch's ruleset asks for")
         if "machine" in p and p["machine"] not in machines:
             err(w, f"machine `{p['machine']}` is not in [machines]")
         has_bots = any(isinstance(p.get(k), dict) for k in ("plan", "dev"))
