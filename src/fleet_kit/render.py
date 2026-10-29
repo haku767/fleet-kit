@@ -189,7 +189,7 @@ def lists(fl):
         reviews = [a for _, p, kind, _, a, _ in mine if kind == "plan"]
         paused = [a for _, p, kind, _, a, _ in mine if p.get("paused")]
         out[f"machines/{mname}/lists.sh"] = (
-            f"# the account lists for {mname}, rendered by fleet from fleet.toml ({fl.fleet.get('name', '')}); do not edit\n"
+            f"# /etc/fleet/lists.sh: written by `fleet apply lists` from fleet.toml ({fl.fleet.get('name', '')}) for {mname}; do not edit\n"
             f"bots={q(' '.join(accounts + ssh))}\nssh_bots={q(' '.join(ssh))}\nround_bots={q(' '.join(rounds))}\n"
             f"review_bots={q(' '.join(reviews))}\npaused_bots={q(' '.join(paused))}\n")
     for mname, m in fl.machines.items():
@@ -202,7 +202,8 @@ def lists(fl):
         from_names = [g for g, gv in fl.guards.items() if gv.get("machine") == mname] + \
                      [b["name"] for *_, b, _a, bm in all_bots if bm == mname]
         out[f"machines/{mname}/courier.sh"] = (
-            f"# the courier's lists on {mname} (inbox names, the register's), rendered by fleet from fleet.toml; do not edit\n"
+            f"# /etc/fleet/courier.sh: written by `fleet apply lists` from fleet.toml ({fl.fleet.get('name', '')}) for {mname}"
+            f" (inbox names, the register's); do not edit\n"
             f"to_host={q(to)}\nto_ssh={q(c.get('ssh', ''))}\nevery={q(c.get('every', '15m'))}\n"
             f"to_bots={q(' '.join(to_names))}\nfrom_bots={q(' '.join(from_names))}\n")
     return out
@@ -256,16 +257,34 @@ def apply_conf(files, directory, dry_run=False):
     """Puts the rendered bots/*.conf into `directory` (0755, files 0644), removes a .conf there
     that the render no longer has and that carries the header (never a hand-written file).
     Returns the list of (action, path): added, changed, removed, kept."""
+    wanted = {rel.split("/", 1)[1]: text for rel, text in files.items() if rel.startswith("bots/")}
+    return apply_files(wanted, directory, "written by `fleet apply conf`", (".conf",), dry_run)
+
+
+def apply_lists(files, machine, directory, dry_run=False):
+    """Puts this machine's lists.sh (a bots machine) and courier.sh (a machine with a courier)
+    into `directory` as /etc/fleet/lists.sh and /etc/fleet/courier.sh; removes one of the two
+    there when the render no longer has it for this machine. Same return as apply_conf."""
+    wanted = {rel.rsplit("/", 1)[1]: text for rel, text in files.items() if rel.startswith(f"machines/{machine}/")}
+    return apply_files(wanted, directory, "written by `fleet apply lists`", ("lists.sh", "courier.sh"), dry_run)
+
+
+def apply_files(wanted, directory, marker, names, dry_run):
+    """Writes `wanted` (file name -> text) into `directory`, atomically, 0644; removes a file
+    there whose name ends in one of `names`, carries `marker` in its first line and is not
+    wanted any more. Returns the list of (action, path): added, changed, removed, kept."""
     import os
     import tempfile
-    wanted = {rel.split("/", 1)[1]: text for rel, text in files.items() if rel.startswith("bots/")}
     actions = []
     if not dry_run:
         os.makedirs(directory, mode=0o755, exist_ok=True)
     present = set(os.listdir(directory)) if os.path.isdir(directory) else set()
     for fname, text in wanted.items():
         path = os.path.join(directory, fname)
-        old = open(path).read() if fname in present else None
+        old = None
+        if fname in present:
+            with open(path) as f:
+                old = f.read()
         if old == text:
             actions.append(("kept", path))
             continue
@@ -278,7 +297,11 @@ def apply_conf(files, directory, dry_run=False):
             os.replace(tmp, path)
     for fname in sorted(present - set(wanted)):
         path = os.path.join(directory, fname)
-        if fname.endswith(".conf") and os.path.isfile(path) and "written by `fleet apply conf`" in open(path).readline():
+        if not fname.endswith(names) or not os.path.isfile(path):
+            continue
+        with open(path) as f:
+            first = f.readline()
+        if marker in first:
             actions.append(("removed", path))
             if not dry_run:
                 os.remove(path)

@@ -171,3 +171,31 @@ class RenderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ApplyListsTests(unittest.TestCase):
+    def test_apply_lists_per_machine(self):
+        import os
+        import tempfile
+        text = MINIMAL.read_text() + (
+            '\n[machines.desk]\nrole = "guard"\nfamily = "nixos"\nhome_root = "/srv"\n'
+            'courier = { to = "box", every = "15m", ssh = "box-drop" }\n[guards.g]\nmachine = "desk"\napps = ["x-g"]\n')
+        files = render.render(tomllib.loads(text))
+        self.assertIn("machines/box/lists.sh", files)
+        self.assertIn("machines/desk/courier.sh", files)
+        self.assertNotIn("machines/desk/lists.sh", files)
+        with tempfile.TemporaryDirectory() as d:
+            acts = render.apply_lists(files, "box", d)
+            self.assertEqual([(w, os.path.basename(p)) for w, p in acts], [("added", "lists.sh")])
+            with open(os.path.join(d, "lists.sh")) as f:
+                head = f.readline()
+            self.assertIn("written by `fleet apply lists`", head)
+            self.assertIn("for box", head)
+            with open(os.path.join(d, "mine.sh"), "w") as f:
+                f.write("bots=hand\n")
+            acts = render.apply_lists(files, "desk", d, dry_run=True)
+            self.assertEqual(sorted((w, os.path.basename(p)) for w, p in acts), [("added", "courier.sh"), ("removed", "lists.sh")])
+            self.assertTrue(os.path.exists(os.path.join(d, "lists.sh")))   # a dry run
+            acts = render.apply_lists(files, "desk", d)
+            self.assertEqual(sorted(os.listdir(d)), ["courier.sh", "mine.sh"])
+            self.assertEqual([w for w, _ in render.apply_lists(files, "desk", d)], ["kept"])
