@@ -6,10 +6,14 @@ and reviews, a dev bot that builds `ready` issues in headless rounds), each in i
 account on a machine that is always on.
 
 This is the tooling behind haku's fleet (haku767/fleet is its register and plans), pulled
-out so that it pays for that fleet first and for the next person second. Status, 2026-10-28:
-stage 2 of fleet PLANS 13, `fleet check`, `fleet render` and `fleet apply conf` work; the scripts that read the files are ws-guard's next step. Nothing here is needed to
-run a fleet yet; the scripts a fleet runs on (`bot-round`, `bot-review`, the install
-scripts) still live in haku's dotfiles and will read what this tool renders.
+out so that it pays for that fleet first and for the next person second. Status, 2026-10-29
+(fleet PLANS 13, stage 4): the file, `check`, `render`, `apply conf`, `apply lists`, `labels`,
+`ruleset`, `add-project`, `add-bot` and the GitHub half of `doctor` work and run haku's fleet;
+the round scripts (`bot-round`, `bot-review`, `fleet-token`) and the install script for the
+accounts still live in haku's dotfiles and read what this tool renders. So the kit carries
+the register and the GitHub side of a fleet today, not yet the scripts a round runs on.
+[`docs/getting-started.md`](docs/getting-started.md) is the guide for a fleet of your own,
+with that line drawn plainly.
 
 ## The file
 
