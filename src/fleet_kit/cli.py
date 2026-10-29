@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 
-from . import __version__, edit, labels, model, render, ruleset
+from . import __version__, doctor, edit, labels, model, render, ruleset
 from .github import GH, GHError
 
 DEFAULT_CONF_DIR = "/etc/fleet/bots"
@@ -300,6 +300,23 @@ def cmd_add_bot(args):
                        args.project, [args.kind], machine)
 
 
+def cmd_doctor(args):
+    doc = load_checked(args.file, "doctor")
+    if doc is None:
+        return 1
+    names = projects_for(doc, args.project, "doctor")
+    if names is None:
+        return 1
+    findings = doctor.run(GH(), doc, names)
+    for x in findings:
+        if x.level != "ok" or args.verbose:
+            print(x)
+    n = {lv: sum(1 for x in findings if x.level == lv) for lv in ("ok", "warn", "fail", "skip")}
+    print(f"fleet doctor (GitHub): {len(findings)} checks: {n['ok']} ok, {n['warn']} warn, {n['fail']} fail, {n['skip']} skipped"
+          + ("" if args.verbose else "; -v lists the ok ones") + ". The machine half is not in the kit yet (PLANS 13 stage 3e).")
+    return 1 if n["fail"] else 0
+
+
 def cmd_later(args):
     print(f"fleet {args.command}: {NEXT}", file=sys.stderr)
     return 2
@@ -358,8 +375,13 @@ def main(argv=None):
     ab.add_argument("--machine", help="the bot's machine when several have role bots")
     ab.add_argument("file", nargs="?", default="fleet.toml")
     ab.set_defaults(func=cmd_add_bot)
-    for name, help_ in (("doctor", "what is wrong on this machine and on GitHub"), ("status", "the page's lists in the terminal"),
-                        ("page", "install collector and page")):
+    d = sub.add_parser("doctor", help="what is wrong on GitHub for a project: repository, labels, ruleset, Apps, installations, "
+                                      "who set ready, the runner (the machine half follows)")
+    d.add_argument("project", nargs="?", default="all", help="a project from the file, or `all` (default)")
+    d.add_argument("file", nargs="?", default="fleet.toml")
+    d.add_argument("-v", "--verbose", action="store_true", help="list the checks that are ok too")
+    d.set_defaults(func=cmd_doctor)
+    for name, help_ in (("status", "the page's lists in the terminal"), ("page", "install collector and page")):
         p = sub.add_parser(name, help=f"{help_} ({NEXT.split(':')[0]})")
         p.add_argument("rest", nargs=argparse.REMAINDER)
         p.set_defaults(func=cmd_later)
