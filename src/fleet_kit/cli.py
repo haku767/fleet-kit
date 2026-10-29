@@ -383,7 +383,17 @@ def main(argv=None):
     d.set_defaults(func=cmd_doctor)
     for name, help_ in (("status", "the page's lists in the terminal"), ("page", "install collector and page")):
         p = sub.add_parser(name, help=f"{help_} ({NEXT.split(':')[0]})")
-        p.add_argument("rest", nargs=argparse.REMAINDER)
+        p.add_argument("rest", nargs="*")
         p.set_defaults(func=cmd_later)
-    args = ap.parse_args(argv)
+    # `fleet add-project tool --repo o/r --stack py fleet.toml` has a positional after the options;
+    # parse_args refuses that before Python 3.12, parse_intermixed_args knows no subparsers, so the
+    # subcommand is picked out here and its parser parses the rest intermixed
+    argv = list(sys.argv[1:] if argv is None else argv)
+    cmd = next((a for a in argv if not a.startswith("-")), None)
+    if cmd not in sub.choices:
+        args = ap.parse_args(argv)   # --help, --version, or the usual error
+    else:
+        i = argv.index(cmd)
+        args = sub.choices[cmd].parse_intermixed_args(argv[:i] + argv[i + 1:])
+        args.command = cmd
     return args.func(args)
