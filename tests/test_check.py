@@ -128,6 +128,15 @@ class RenderTests(unittest.TestCase):
         self.assertTrue(any("unknown key `test_extra_zig`" in str(x)
                             for x in check_text(TWO_STACKS + '\n[projects.q]\nrepo = "own/q"\ntest_extra_zig = "x"\n')))
 
+    def test_guard_project(self):
+        text = TWO_STACKS + '\n[projects.notes]\nrepo = "own/notes"\n[guards.g]\nmachine = "m"\nproject = "notes"\napps = ["own-g"]\n'
+        self.assertEqual(errors(check_text(text)), [])
+        import json
+        tables = json.loads(render.render(tomllib.loads(text))["tables.json"])
+        self.assertIn(["g", "guard", "notes", "m", "none", "g"], tables["bots"])
+        bad = text.replace('project = "notes"', 'project = "nope"')
+        self.assertTrue(any("project `nope`" in x for x in errors(check_text(bad))))
+
     def test_conf_is_valid_sh(self):
         import subprocess
         files = render.render(tomllib.loads(TWO_STACKS))

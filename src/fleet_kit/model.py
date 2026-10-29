@@ -33,7 +33,7 @@ KEYS = {
     "project": {"repo", "stacks", "test", "test_extra", "test_note", "ci", "ci_note", "ci_checks", "review_note",
                 "allow_extra", "env", "runner", "reads", "deploy", "paused", "owner_app", "ready_also", "plan", "dev", "machine"},
     "bot": {"name", "account", "app", "persona", "budget_usd", "machine"},
-    "guard": {"machine", "persona", "apps"},
+    "guard": {"machine", "project", "persona", "apps"},
     "person": {"role", "projects"},
 }
 
@@ -161,6 +161,8 @@ def check(text, doc):
             err(w, "machine must name a machine")
         if not isinstance(g.get("apps"), list) or not g["apps"]:
             err(w, "apps must list the guard's App slug (and a second App per foreign owner)")
+        if "project" in g and g["project"] not in (doc.get("projects") or {}):
+            err(w, f"project `{g['project']}` is not in [projects]")
     for mname, m in machines.items():
         if "guard" in m and m["guard"] not in guard_names:
             err(f"machines.{mname}", f"guard `{m['guard']}` is not in [guards]")

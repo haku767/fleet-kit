@@ -217,8 +217,11 @@ def tables(fl):
         bots.append([b["name"], kind, p.get("repo", "").rsplit("/", 1)[-1], machine, rounds, account])
         if p.get("paused") and pname not in paused:
             paused.append(pname)
-    for g, gv in fl.guards.items():
-        bots.append([g, "guard", "", gv.get("machine"), "none", g])
+    botless = [p.get("repo", "").rsplit("/", 1)[-1] for p in fl.projects.values()
+               if not any(isinstance(p.get(k), dict) for k in ("plan", "dev"))]
+    for g, gv in fl.guards.items():   # a guard's project: its own, else the first without bots (as fleet-collect)
+        proj = fl.projects.get(gv.get("project"), {}).get("repo", "").rsplit("/", 1)[-1] or (botless[0] if botless else "")
+        bots.append([g, "guard", proj, gv.get("machine"), "none", g])
     owner_app = {}
     for gv in fl.guards.values():
         for a in gv.get("apps") or []:
