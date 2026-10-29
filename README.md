@@ -32,7 +32,8 @@ haku767/fleet.
 | `fleet ruleset <project>\|all [--apply] [fleet.toml]` | works | a project with `reviews = N` wants the ruleset `main-rule` on its default branch: no deletion, no force push, a pull request with N approving reviews; the command shows the differences, `--apply` creates or updates it (admin rights: the owner, not a bot). Without `reviews` it only reports what the repository has |
 | `fleet add-project <name> --repo O/R --stack S [--test CMD] [--ci ...] [--reviews N] [--plan NAME] [--dev NAME] [--no-plan] [--no-dev] [--machine M] [--paused] [fleet.toml]` | works | appends `[projects.<name>]` with its plan and dev bot (default `<name>-plan`, `<name>-dev`) before the guards, checks the result and writes only when it is clean; then prints what is still by hand: the Apps with their permissions and installation, labels, ruleset, the accounts and keys on the machine, the first round |
 | `fleet add-bot <project> plan\|dev [--name N] [--account A] [--persona P] [--machine M] [fleet.toml]` | works | adds the one bot line to the project's block, same check and the same steps for that bot |
-| `fleet apply` (accounts, units), `doctor`, `status`, `page` | planned | fleet PLANS 13, stage 3 |
+| `fleet doctor [project\|all] [-v] [fleet.toml]` | GitHub half works | one line per check, `ok`/`warn`/`fail`/`skip`, exit 1 on a fail: the repository reachable, labels and ruleset as the file says, each bot's App with the permissions it needs (checks and actions read only where `ci` is not `no`), installed on the repository and its `reads` (seen only by the owner's login), every open `ready` set by someone trusted, the runner online, the guards' Apps. The machine half (accounts, timers, status files, inboxes) follows from ws-guard |
+| `fleet apply` (accounts, units), `status`, `page` | planned | fleet PLANS 13, stage 3 |
 
 Python 3.11 or newer, standard library only. To try it without installing:
 
@@ -44,6 +45,7 @@ or `pip install -e .` for the `fleet` command. Tests: `python3 -m unittest disco
 
 - `src/fleet_kit/model.py`: loads the file, the checks.
 - `src/fleet_kit/edit.py`: `add-project` and `add-bot` (text insertion, the file keeps its comments; the GitHub steps).
+- `src/fleet_kit/doctor.py`: the GitHub checks, one Finding each; a fake `gh` in the tests.
 - `src/fleet_kit/labels.py`, `ruleset.py`: what a repository should have, the comparison, the writes; `github.py` runs `gh api`.
 - `src/fleet_kit/render.py`: what the tool derives (its docstring lists the files).
 - `src/fleet_kit/cli.py`: the command.
