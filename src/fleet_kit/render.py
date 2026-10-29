@@ -71,9 +71,12 @@ class Fleet:
         return home, scratch
 
     def project_stacks(self, p):
+        """(main stacks, add-on stacks); an add-on's test holds "{each}" and wraps the others' commands.
+        Each stack dict gets its name under "_name" so the add-on can look up test_extra_<name>."""
         main, addons = [], []
         for s in p.get("stacks") or []:
-            st = self.stacks.get(s) or {}
+            st = dict(self.stacks.get(s) or {})
+            st["_name"] = s
             (addons if "{each}" in (st.get("test") or "") else main).append(st)
         return main, addons
 
@@ -102,8 +105,9 @@ class Fleet:
         for st in addons:
             cmds = [st["test"].replace("{each}", c) for c in split_commands(base)]
             text = "inside the repository's dev shell, one per call: " + "; ".join(cmds)
-            if p.get("test_extra"):
-                text += "; " + p["test_extra"]
+            extra = p.get(f"test_extra_{st['_name']}", p.get("test_extra"))   # the add-on's own wording when given
+            if extra:
+                text += "; " + extra
             if st.get("note"):
                 text += "; " + st["note"]
             out.append(text)

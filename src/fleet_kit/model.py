@@ -87,7 +87,8 @@ def check(text, doc):
 
     def keys(where, table, allowed):
         for k in table:
-            if k not in allowed:
+            if k not in allowed and not (allowed is KEYS["project"] and k.startswith("test_extra_")
+                                         and k.removeprefix("test_extra_") in (doc.get("stacks") or {})):
                 warn(where, f"unknown key `{k}`")
 
     def tables(name):
