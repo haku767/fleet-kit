@@ -4,7 +4,8 @@ import argparse
 import os
 import sys
 
-from . import __version__, model, render
+from . import __version__, labels, model, render, ruleset
+from .github import GH, GHError
 
 DEFAULT_CONF_DIR = "/etc/fleet/bots"
 NEXT = "not yet: fleet PLANS 13, stage 3"
@@ -93,6 +94,102 @@ def cmd_apply(args):
     return 0
 
 
+def projects_for(doc, name, cmd):
+    """The projects a GitHub command works on: one by name, or `all` with bots."""
+    projects = doc.get("projects") or {}
+    if name == "all":
+        return [n for n, p in projects.items() if p.get("plan") or p.get("dev")]
+    if name not in projects:
+        print(f"fleet {cmd}: no project {name} in the file", file=sys.stderr)
+        return None
+    return [name]
+
+
+def cmd_labels(args):
+    doc = load_checked(args.file, "labels")
+    if doc is None:
+        return 1
+    names = projects_for(doc, args.project, "labels")
+    if names is None:
+        return 1
+    gh = GH()
+    failed = todo = 0
+    for pname in names:
+        p = doc["projects"][pname]
+        repo = p["repo"]
+        if not (p.get("plan") or p.get("dev")):
+            print(f"{pname} ({repo}): no bots, no fleet labels wanted")
+            continue
+        wanted = labels.desired(doc, pname)
+        try:
+            have = labels.fetch(gh, repo)
+            pl = labels.plan(wanted, have)
+            print(f"{pname} ({repo}): {len(pl['create'])} to create, {len(pl['update'])} to change, "
+                  f"{len(pl['ok'])} as wanted, {len(pl['other'])} other label(s) left alone")
+            for line in labels.describe(pl):
+                print(line)
+            if args.verbose and pl["other"]:
+                print("  other   " + ", ".join(pl["other"]))
+            if args.apply and (pl["create"] or pl["update"]):
+                n = labels.apply(gh, repo, pl)
+                print(f"  done: {n} label(s) written")
+            todo += len(pl["create"]) + len(pl["update"])
+        except GHError as e:
+            print(f"{pname} ({repo}): {e}", file=sys.stderr)
+            failed += 1
+    if todo and not args.apply:
+        print("fleet labels: nothing written; add --apply to create and change them (needs write access to the repository)")
+    return 1 if failed else 0
+
+
+def cmd_ruleset(args):
+    doc = load_checked(args.file, "ruleset")
+    if doc is None:
+        return 1
+    names = projects_for(doc, args.project, "ruleset")
+    if names is None:
+        return 1
+    gh = GH()
+    failed = todo = 0
+    for pname in names:
+        p = doc["projects"][pname]
+        repo = p["repo"]
+        try:
+            have_all = ruleset.fetch(gh, repo)
+        except GHError as e:
+            print(f"{pname} ({repo}): {e}", file=sys.stderr)
+            failed += 1
+            continue
+        have = next((r for r in have_all if r.get("name") == ruleset.RULESET_NAME), None)
+        others = [r["name"] for r in have_all if r is not have]
+        if "reviews" not in p:
+            state = f"has `{ruleset.RULESET_NAME}`" if have else "has none"
+            print(f"{pname} ({repo}): no `reviews` in the file, no ruleset wanted; the repository {state}"
+                  + (f", also {', '.join(others)}" if others else ""))
+            continue
+        want = ruleset.wanted(p["reviews"])
+        d = ruleset.diff(want, have)
+        real = [x for x in d if not x.endswith("(kept)")]
+        print(f"{pname} ({repo}): ruleset `{ruleset.RULESET_NAME}` on the default branch, {p['reviews']} approving review(s): "
+              + ("as wanted" if not real else ("missing" if have is None else f"{len(real)} difference(s)")))
+        for x in d:
+            if x != "missing":
+                print(f"  {x}")
+        if others:
+            print(f"  other ruleset(s) left alone: {', '.join(others)}")
+        if real:
+            todo += 1
+            if args.apply:
+                try:
+                    print(f"  {ruleset.apply(gh, repo, want, have)}")
+                except GHError as e:
+                    print(f"{pname} ({repo}): {e}", file=sys.stderr)
+                    failed += 1
+    if todo and not args.apply:
+        print("fleet ruleset: nothing written; add --apply to create or change it (needs admin rights on the repository: the owner)")
+    return 1 if failed else 0
+
+
 def cmd_later(args):
     print(f"fleet {args.command}: {NEXT}", file=sys.stderr)
     return 2
@@ -117,9 +214,16 @@ def main(argv=None):
     a.add_argument("--dry-run", action="store_true", help="say what would change, write nothing")
     a.add_argument("-v", "--verbose", action="store_true", help="list the unchanged files too")
     a.set_defaults(func=cmd_apply)
+    for name, help_, fn in (("labels", "the fleet's labels in a project's repository (gh api)", cmd_labels),
+                            ("ruleset", "the rule on a project's default branch (gh api, the owner)", cmd_ruleset)):
+        g = sub.add_parser(name, help=help_)
+        g.add_argument("project", help="a project from the file, or `all` (every project with bots)")
+        g.add_argument("file", nargs="?", default="fleet.toml")
+        g.add_argument("--apply", action="store_true", help="write to GitHub; without it the command only compares")
+        g.add_argument("-v", "--verbose", action="store_true", help="list the repository's other labels too")
+        g.set_defaults(func=fn)
     for name, help_ in (("doctor", "what is wrong on this machine and on GitHub"), ("status", "the page's lists in the terminal"),
                         ("add-project", "append a project"), ("add-bot", "append a bot"),
-                        ("labels", "create a project's labels"), ("ruleset", "the default branch's ruleset"),
                         ("page", "install collector and page")):
         p = sub.add_parser(name, help=f"{help_} ({NEXT.split(':')[0]})")
         p.add_argument("rest", nargs=argparse.REMAINDER)
