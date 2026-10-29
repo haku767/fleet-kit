@@ -119,6 +119,15 @@ class RenderTests(unittest.TestCase):
         self.assertIn("review_note='be careful'", plan)
         self.assertIn("bots='p-dev pp'", files["machines/m/lists.sh"].replace("'pp p-dev'", "'p-dev pp'"))
 
+    def test_addon_takes_its_own_test_extra(self):
+        text = TWO_STACKS.replace('test_extra = "extra-check"', 'test_extra = "extra-check"\ntest_extra_nix = "nix develop -c extra-check"')
+        self.assertEqual([str(x) for x in check_text(text) if "unknown key" in str(x)], [])
+        dev = render.render(tomllib.loads(text))["bots/p-dev.conf"]
+        self.assertIn("test_cmd='cargo fmt --check && cargo test --locked; extra-check.", dev)
+        self.assertIn("nix develop -c cargo test --locked; nix develop -c extra-check; nix flake check", dev)
+        self.assertTrue(any("unknown key `test_extra_zig`" in str(x)
+                            for x in check_text(TWO_STACKS + '\n[projects.q]\nrepo = "own/q"\ntest_extra_zig = "x"\n')))
+
     def test_conf_is_valid_sh(self):
         import subprocess
         files = render.render(tomllib.loads(TWO_STACKS))
