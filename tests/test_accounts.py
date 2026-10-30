@@ -69,6 +69,10 @@ class AccountsTests(unittest.TestCase):
     def test_second_run_keeps(self):
         rec = Recorder(users={"erik"})
         self.apply(load(admin="erik"), rec)
+        # what the real loginctl would have left behind (the fake runs nothing)
+        for acct in ("myapp-dev", "myapp-plan"):
+            (self.root / "var/lib/systemd/linger").mkdir(parents=True, exist_ok=True)
+            (self.root / "var/lib/systemd/linger" / acct).write_text("")
         rec.calls.clear()
         acts = self.apply(load(admin="erik"), rec)
         self.assertEqual([c[0] for c in rec.calls if c[0] in ("useradd", "groupadd")], [])
