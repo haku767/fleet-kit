@@ -109,6 +109,27 @@ class AccountsTests(unittest.TestCase):
         self.assertEqual(self.apply(doc, Recorder())[0][0], "skipped")
         self.assertEqual(accounts.apply_accounts(load(), "nowhere", root=self.root)[0][0], "skipped")
 
+    def test_wrong_owner_is_fixed_shared_dirs_keep_theirs(self):
+        rec = Recorder(users={"myapp-dev", "myapp-plan"})
+        (self.root / "srv/myapp-dev").mkdir(parents=True)
+        (self.root / "srv/myapp-dev").chmod(0o750)
+        (self.root / "srv/agents").mkdir(parents=True)
+        (self.root / "srv/agents").chmod(0o2775)
+        owners = {str(self.root / "srv/myapp-dev"): "root", str(self.root / "srv/agents"): "someone"}
+        acts = accounts.apply_accounts(load(), "box", root=self.root, run=rec.run,
+                                       user_exists=lambda u: u in rec.users, group_exists=lambda g: g in rec.groups,
+                                       owner_of=lambda p: owners.get(p, "myapp-dev"))
+        self.assertIn(("changed", "/srv/myapp-dev (750)"), acts)                 # a bot's home: the bot's
+        self.assertIn(("kept", "/srv/agents (2775, group agents)"), acts)          # a shared directory keeps its owner
+
+    def test_chown_as_root_in_a_trial_does_not_crash(self):
+        s = accounts.System(root=self.root)
+        s.is_root = True
+        d = self.root / "x"
+        d.mkdir()
+        s.chown(d, "no-such-user-xyz")   # the recorded useradd did not run: no KeyError
+        self.assertEqual(s.calls[-1][:3], ["chown", "-h", "no-such-user-xyz:no-such-user-xyz"])
+
     def test_link_in_the_way_is_left(self):
         rec = Recorder(users={"myapp-dev", "myapp-plan"})
         (self.root / "srv/myapp-dev").mkdir(parents=True)

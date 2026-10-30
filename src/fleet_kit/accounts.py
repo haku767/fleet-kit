@@ -31,13 +31,15 @@ GROUP = "agents"
 
 
 class System:
-    def __init__(self, root="/", run=None, dry_run=False, user_exists=None, group_exists=None):
+    def __init__(self, root="/", run=None, dry_run=False, user_exists=None, group_exists=None, owner_of=None):
         self.root = Path(root)
         self._run = run
         self.dry_run = dry_run
         self._user_exists = user_exists
         self._group_exists = group_exists
+        self._owner_of = owner_of
         self.is_root = os.geteuid() == 0
+        self.trial = self.root != Path("/")   # a trial root: nothing of the system is touched
         self.calls = []
 
     def path(self, p):
@@ -46,7 +48,7 @@ class System:
     def run(self, *argv):
         """A system command; recorded, skipped in a dry run or when not root (a trial)."""
         self.calls.append(list(argv))
-        if self.dry_run or not self.is_root or self.root != Path("/"):
+        if self.dry_run or not self.is_root or self.trial:
             if self._run is None:
                 return ""
         if self._run is not None:
@@ -75,22 +77,42 @@ class System:
             return False
 
     def chown(self, p, user, group=None):
+        """Recorded always; done only for real (root, no trial root), and never a crash when the
+        account is not there yet (a trial root as root: the recorded useradd did not run)."""
         self.calls.append(["chown", "-h", f"{user}:{group or user}", str(p)])
-        if self.dry_run or not self.is_root:
+        if self.dry_run or not self.is_root or self.trial:
             return
-        uid = pwd.getpwnam(user).pw_uid
-        gid = grp.getgrnam(group).gr_gid if group else pwd.getpwnam(user).pw_gid
+        try:
+            uid = pwd.getpwnam(user).pw_uid
+            gid = grp.getgrnam(group).gr_gid if group else pwd.getpwnam(user).pw_gid
+        except KeyError:
+            return
         os.lchown(p, uid, gid)
 
-    def ensure_dir(self, rel, mode, user=None, group=None):
+    def owner(self, p):
+        """The owner's name, when it can be known: a test's answer, or the real one as root."""
+        if self._owner_of is not None:
+            return self._owner_of(str(p))
+        if not self.is_root or self.trial:
+            return None
+        try:
+            return pwd.getpwuid(p.stat().st_uid).pw_name
+        except KeyError:
+            return None
+
+    def ensure_dir(self, rel, mode, user=None, group=None, fix_owner=True):
+        """A directory with that mode, and (fix_owner) that owner: an existing one with another
+        owner is chowned and reported as changed; a shared directory (fix_owner=False) keeps the
+        owner it has, the user matters only when it is made."""
         p = self.path(rel)
         was = p.is_dir()
-        if was and stat.S_IMODE(p.stat().st_mode) == mode:
+        wrong_owner = was and fix_owner and user is not None and self.owner(p) not in (None, user)
+        if was and stat.S_IMODE(p.stat().st_mode) == mode and not wrong_owner:
             return "kept"
         if not self.dry_run:
             p.mkdir(parents=True, exist_ok=True)
             os.chmod(p, mode)
-            if user:
+            if user and (not was or wrong_owner):
                 self.chown(p, user, group)
         return "changed" if was else "added"
 
@@ -133,21 +155,23 @@ def courier_guards(doc, machine):
             if (((doc.get("machines") or {}).get(gv.get("machine")) or {}).get("courier") or {}).get("to") == machine]
 
 
-def apply_accounts(doc, machine, root="/", dry_run=False, run=None, user_exists=None, group_exists=None):
+def apply_accounts(doc, machine, root="/", dry_run=False, run=None, user_exists=None, group_exists=None, owner_of=None):
     m, out = machine_of(doc, machine)
     if m is None:
         return out
-    s = System(root, run, dry_run, user_exists, group_exists)
+    s = System(root, run, dry_run, user_exists, group_exists, owner_of)
     fl = render.Fleet(doc)
     agents_dir = fl.fleet.get("agents_dir", "/srv/agents")
     admin = m.get("admin")
     if not s.group(GROUP):
         s.run("groupadd", GROUP)
         out.append(("added", f"group {GROUP}"))
-    out.append((s.ensure_dir(agents_dir, 0o2775, "root", GROUP), f"{agents_dir} (2775, group {GROUP})"))
+    # the shared directories keep the owner they have (on ws-msi /srv/agents is hakuws's since
+    # the agents phase); the mode is the kit's
+    out.append((s.ensure_dir(agents_dir, 0o2775, "root", GROUP, fix_owner=False), f"{agents_dir} (2775, group {GROUP})"))
     for sub in ("inbox", "status"):
-        out.append((s.ensure_dir(f"{agents_dir}/{sub}", 0o2775 if sub == "status" else 0o755, "root", GROUP if sub == "status" else "root"),
-                    f"{agents_dir}/{sub}"))
+        out.append((s.ensure_dir(f"{agents_dir}/{sub}", 0o2775 if sub == "status" else 0o755, "root", GROUP if sub == "status" else "root",
+                                 fix_owner=False), f"{agents_dir}/{sub}"))
     if admin and s.user(admin):
         s.run("usermod", "-aG", GROUP, admin)
     mine = [(kind, b, acct) for pname, p, kind, b, acct, bm in fl.bots() if bm == machine]
@@ -175,8 +199,8 @@ def apply_accounts(doc, machine, root="/", dry_run=False, run=None, user_exists=
     if not admin:
         out.append(("skipped", f"no admin for {machine} in the file ([machines.{machine}] admin = \"<login>\"): "
                                "nobody but root reads the bots' homes"))
-    if s.root != Path("/") or (not s.is_root and not dry_run):
-        out.append(("skipped", "trial: groupadd, useradd, usermod and loginctl recorded, not run"))
+    if s.trial or (not s.is_root and not dry_run):
+        out.append(("skipped", "trial: groupadd, useradd, usermod, loginctl and chown recorded, not run"))
     return out
 
 
@@ -198,16 +222,16 @@ def inbox_owner(doc, fl, name, machine, here_accounts):
     return None
 
 
-def apply_inbox(doc, machine, root="/", dry_run=False, run=None, user_exists=None, group_exists=None):
+def apply_inbox(doc, machine, root="/", dry_run=False, run=None, user_exists=None, group_exists=None, owner_of=None):
     m, out = machine_of(doc, machine)
     if m is None:
         return out
-    s = System(root, run, dry_run, user_exists, group_exists)
+    s = System(root, run, dry_run, user_exists, group_exists, owner_of)
     fl = render.Fleet(doc)
     agents_dir = fl.fleet.get("agents_dir", "/srv/agents")
     admin = m.get("admin")
     inbox = f"{agents_dir}/inbox"
-    out.append((s.ensure_dir(inbox, 0o755, "root", "root"), inbox))
+    out.append((s.ensure_dir(inbox, 0o755, "root", "root", fix_owner=False), inbox))
     couriers = courier_guards(doc, machine)
     here = {acct for *_, acct, bm in fl.bots() if bm == machine} | set(couriers) | {g for g, gv in (doc.get("guards") or {}).items() if gv.get("machine") == machine}
     names = [b["name"] for *_, b, _a, _m in fl.bots()] + sorted(doc.get("guards") or {})
@@ -238,6 +262,6 @@ def apply_inbox(doc, machine, root="/", dry_run=False, run=None, user_exists=Non
         s.run("setfacl", "-d", "-m", f"u::rwx,u:{owner}:rwx" + (f",u:{admin}:rwx" if admin else "") + ",g::-,o::-", d)
     if not admin:
         out.append(("skipped", f"no admin for {machine} in the file: the inboxes get no ACL for a person, root reads them"))
-    if s.root != Path("/") or (not s.is_root and not dry_run):
+    if s.trial or (not s.is_root and not dry_run):
         out.append(("skipped", "trial: chown, setfacl recorded, not run"))
     return out
