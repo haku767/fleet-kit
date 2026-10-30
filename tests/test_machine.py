@@ -105,8 +105,14 @@ def where(findings, w):
 
 
 class MachineTests(unittest.TestCase):
+    def world(self, **kw):
+        """A World whose temporary root goes when the test ends (no ResourceWarning)."""
+        w = World(load(), **kw)
+        self.addCleanup(w.tmp.cleanup)
+        return w
+
     def test_green_world_has_no_warn_or_fail(self):
-        w = World(load())
+        w = self.world()
         f = w.run()
         self.assertEqual(by_level(f, "fail"), [])
         self.assertEqual(by_level(f, "warn"), [])
@@ -119,13 +125,13 @@ class MachineTests(unittest.TestCase):
         self.assertNotIn("scratch:myapp-plan", wheres)   # a plan bot builds nothing
 
     def test_other_machine_is_skipped(self):
-        w = World(load())
+        w = self.world()
         f = machine.run(w.doc, "elsewhere", root=w.root)
         self.assertEqual(len(f), 1)
         self.assertEqual(f[0].level, "skip")
 
     def test_missing_account_fails_and_stops_that_bot(self):
-        w = World(load())
+        w = self.world()
         del w.users["myapp-dev"]
         f = w.run()
         self.assertTrue(any("no Unix account myapp-dev" in x for x in by_level(f, "fail")))
@@ -133,7 +139,7 @@ class MachineTests(unittest.TestCase):
         self.assertTrue(where(f, "conf:myapp-plan"))
 
     def test_conf_missing_wrong_owner_stale(self):
-        w = World(load())
+        w = self.world()
         os.remove(w.p("/etc/fleet/bots/myapp-dev.conf"))
         self.assertEqual(where(w.run(), "conf:myapp-dev")[0].level, "fail")
         w.mk("/etc/fleet/bots/myapp-dev.conf", "kind='dev'\n", 0o664)   # group-writable
@@ -146,7 +152,7 @@ class MachineTests(unittest.TestCase):
         self.assertIn("another kind", where(w.run(), "conf:myapp-dev")[0].message)
 
     def test_lists_and_scripts(self):
-        w = World(load())
+        w = self.world()
         os.remove(w.p("/etc/fleet/lists.sh"))
         self.assertEqual(where(w.run(), "lists")[0].level, "fail")
         w.mk("/etc/fleet/lists.sh", "bots=''\n", 0o644)
@@ -160,12 +166,12 @@ class MachineTests(unittest.TestCase):
         self.assertEqual(where(f, "scripts")[0].level, "skip")
 
     def test_timer_and_paused(self):
-        w = World(load())
+        w = self.world()
         w.units["bot-round@myapp-dev.timer"] = ("enabled", "inactive")
         x = where(w.run(), "timer:myapp-dev")[0]
         self.assertEqual(x.level, "fail")
         self.assertIn("enabled/inactive", x.message)
-        p = World(load(), paused=True)
+        p = self.world(paused=True)
         f = p.run()
         self.assertEqual(where(f, "timer:myapp-dev")[0].level, "warn")   # paused, timer still on
         self.assertEqual(where(f, "status:myapp-dev")[0].level, "ok")
@@ -173,7 +179,7 @@ class MachineTests(unittest.TestCase):
         self.assertEqual(where(p.run(), "timer:myapp-dev")[0].level, "ok")
 
     def test_status_signed_out_old_retry(self):
-        w = World(load())
+        w = self.world()
         w.status("myapp-dev", "round", "idle", NOW - 60, signed_in=False)
         self.assertEqual(where(w.run(), "status:myapp-dev")[0].level, "fail")
         w.status("myapp-dev", "round", "idle", NOW - 6 * 3600)
@@ -186,7 +192,7 @@ class MachineTests(unittest.TestCase):
         self.assertIn("no round has run", where(w.run(), "status:myapp-plan")[0].message)
 
     def test_inbox_missing_owner_old_note(self):
-        w = World(load())
+        w = self.world()
         self.assertEqual(where(w.run(), "inbox:myapp-plan")[0].message, "empty")
         q = w.mk("/srv/agents/inbox/myapp-plan/2026-01-01-x.md", "hi\n")
         self.assertIn("1 note(s) waiting", where(w.run(), "inbox:myapp-plan")[0].message)
@@ -205,7 +211,7 @@ class MachineTests(unittest.TestCase):
         self.assertEqual(where(w.run(), "inbox:myapp-dev")[0].level, "fail")
 
     def test_home_details_and_tokens(self):
-        w = World(load())
+        w = self.world()
         os.remove(w.p("/var/lib/systemd/linger/myapp-dev"))
         os.chmod(w.p("/srv/myapp-dev"), 0o755)
         x = where(w.run(), "account:myapp-dev")[0]
@@ -220,7 +226,7 @@ class MachineTests(unittest.TestCase):
         self.assertEqual(where(w.run(), "scratch:myapp-dev")[0].level, "fail")
 
     def test_agents_dir_and_guard_report(self):
-        w = World(load())
+        w = self.world()
         w.doc["machines"]["box"]["guard"] = "g"
         w.doc["guards"] = {"g": {"machine": "box", "apps": ["x"]}}
         x = where(w.run(), "agents")[0]
