@@ -16,7 +16,7 @@ Installed root-owned in /usr/local/bin by `fleet apply rounds`. Per bot account:
                                   ~/.local/bin/gh that runs gh with the token
   fleet-token git-credential get  git's credential helper (set up by "setup")
 """
-import base64, calendar, json, os, shutil, subprocess, sys, time, urllib.error, urllib.request
+import base64, calendar, json, os, shutil, socket, subprocess, sys, time, urllib.error, urllib.request
 from pathlib import Path
 
 CONF = Path.home() / ".config/fleet"
@@ -38,12 +38,25 @@ def jwt(conf=CONF):
     return f"{head}.{body}.{b64(sig)}"
 
 
+RETRIES = 3          # attempts per request: a TLS handshake or a read timing out, a 5xx, a dropped
+PAUSES = (2, 5)      # connection are tried again after these pauses; a 4xx (the App, the key) is not
+
+
 def api(method, path, auth, data=None):
     req = urllib.request.Request(API + path, method=method, data=data,
                                  headers={"Authorization": auth, "Accept": "application/vnd.github+json",
                                           "X-GitHub-Api-Version": "2022-11-28"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.load(r)
+    for attempt in range(RETRIES):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or attempt == RETRIES - 1:
+                raise
+        except (urllib.error.URLError, socket.timeout, ConnectionError, TimeoutError):
+            if attempt == RETRIES - 1:
+                raise
+        time.sleep(PAUSES[min(attempt, len(PAUSES) - 1)])
 
 
 def installation(auth):
@@ -121,3 +134,5 @@ if __name__ == "__main__":
         sys.exit(f"fleet-token: GitHub answered {e.code} {e.reason} for {e.url} (App ID, key, installation?)")
     except FileNotFoundError as e:
         sys.exit(f"fleet-token: {e.filename} is missing (see fleet-token --help)")
+    except (urllib.error.URLError, socket.timeout, ConnectionError, TimeoutError) as e:
+        sys.exit(f"fleet-token: no answer from GitHub after {RETRIES} attempts ({e}); the next round tries again")
