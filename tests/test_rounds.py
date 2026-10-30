@@ -95,12 +95,27 @@ class RoundsTests(unittest.TestCase):
         acts = self.apply(doc)
         self.assertTrue(any(w == "kept" and "paused" in x for w, x in acts))
 
-    def test_dry_run_writes_nothing(self):
+    def test_dry_run_writes_nothing_but_reads_the_units(self):
+        self.sc.state["bot-round@myapp-dev.timer"] = ("enabled", "active")
         acts = self.apply(load(), dry_run=True)
         self.assertFalse((self.root / "usr/local/bin/bot-round").exists())
-        self.assertEqual(self.sc.calls, [])
+        self.assertEqual({c[0] for c in self.sc.calls}, {"show"})   # read-only: no reload, enable or start
         self.assertIn(("added", "/usr/local/bin/bot-round"), acts)
-        self.assertIn(("enabled", "bot-round@myapp-dev.timer"), acts)
+        self.assertIn(("kept", "bot-round@myapp-dev.timer enabled"), acts)       # the real state, not "would be enabled"
+        self.assertIn(("enabled", "bot-review@myapp-plan.timer"), acts)
+
+    def test_trial_root_never_calls_the_real_systemctl(self):
+        acts = rounds.apply(load(), "box", root=self.root)   # no fake: the real one must not run
+        self.assertTrue(any(w == "skipped" and "trial root" in x for w, x in acts))
+        self.assertIn(("enabled", "bot-round@myapp-dev.timer"), acts)   # reported, not done
+        self.assertTrue((self.root / "usr/local/bin/bot-review").is_file())
+
+    def test_ensure_dir_reports_changed_mode(self):
+        (self.root / "srv/myapp-dev/work").mkdir(parents=True)
+        (self.root / "srv/myapp-dev/work").chmod(0o700)
+        acts = self.apply(load())
+        self.assertIn(("changed", "/srv/myapp-dev/work"), acts)
+        self.assertIn(("added", "/srv/myapp-dev/log"), acts)
 
     def test_nixos_and_other_machines(self):
         doc = load()
