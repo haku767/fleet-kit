@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""fleet-token: this bot's GitHub identity, a GitHub App of its own (fleet-kit; docs/eigene-fleet.md
+in haku767/fleet says how to make the App).
+
+Installed root-owned in /usr/local/bin by `fleet apply rounds`. Per bot account:
+  ~/.config/fleet/app-id    the App's ID (GitHub: the App's settings page, "App ID")
+  ~/.config/fleet/app.pem   its private key
+  ~/.config/fleet/<name>/   the same for a second App of this bot (ws-guard's App for Jalelu/Kami,
+                            a private App in Jalelu's account like Kami's own bots', 2026-10-14)
+  ~/.config/fleet/app.pem   the App's private key, mode 600
+
+  fleet-token                     print an installation token (valid for an hour, cached): the
+                                  App's installation on its own account, the bot's repositories
+  fleet-token --app <name>        the same for the second App in ~/.config/fleet/<name>/
+  fleet-token setup               git and gh use the App: credential helper, the App as commit author,
+                                  ~/.local/bin/gh that runs gh with the token
+  fleet-token git-credential get  git's credential helper (set up by "setup")
+"""
+import base64, calendar, json, os, shutil, subprocess, sys, time, urllib.error, urllib.request
+from pathlib import Path
+
+CONF = Path.home() / ".config/fleet"
+CACHE = Path.home() / ".cache/fleet/token.json"
+API = "https://api.github.com"
+
+
+def b64(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def jwt(conf=CONF):
+    app_id = (conf / "app-id").read_text().strip()
+    now = int(time.time())
+    head = b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
+    body = b64(json.dumps({"iat": now - 60, "exp": now + 540, "iss": app_id}).encode())
+    sig = subprocess.run(["openssl", "dgst", "-sha256", "-sign", str(conf / "app.pem")],
+                         input=f"{head}.{body}".encode(), capture_output=True, check=True).stdout
+    return f"{head}.{body}.{b64(sig)}"
+
+
+def api(method, path, auth, data=None):
+    req = urllib.request.Request(API + path, method=method, data=data,
+                                 headers={"Authorization": auth, "Accept": "application/vnd.github+json",
+                                          "X-GitHub-Api-Version": "2022-11-28"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+
+
+def installation(auth):
+    """The installation to mint from: the one on the App's own account (a private App has no
+    other). An installation token sees that installation's repositories only; before, the first
+    one GitHub listed was taken, which a second installation could have changed (2026-10-14)."""
+    inst = api("GET", "/app/installations", auth)
+    if not inst:
+        sys.exit("fleet-token: the App is not installed anywhere (GitHub: the App's page, Install App)")
+    own = api("GET", "/app", auth)["owner"]["login"].lower()
+    return next((i for i in inst if i["account"]["login"].lower() == own), inst[0])
+
+
+def token(app=None):
+    conf = CONF / app if app else CONF
+    cache = CACHE.with_name(f"token-{app}.json") if app else CACHE
+    try:
+        c = json.loads(cache.read_text())
+        if c["until"] > time.time() + 600:
+            return c["token"]
+    except (OSError, ValueError, KeyError):
+        pass
+    auth = f"Bearer {jwt(conf)}"
+    t = api("POST", f"/app/installations/{installation(auth)['id']}/access_tokens", auth, b"")
+    until = calendar.timegm(time.strptime(t["expires_at"], "%Y-%m-%dT%H:%M:%SZ"))
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(cache, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        json.dump({"token": t["token"], "until": until}, fh)
+    return t["token"]
+
+
+def setup():
+    slug = api("GET", "/app", f"Bearer {jwt()}")["slug"]
+    bot = api("GET", f"/users/{slug}%5Bbot%5D", f"token {token()}")
+    git = lambda *a: subprocess.run(["git", "config", "--global", *a], check=True)
+    git("user.name", f"{slug}[bot]")
+    git("user.email", f"{bot['id']}+{slug}[bot]@users.noreply.github.com")
+    subprocess.run(["git", "config", "--global", "--unset-all", "credential.https://github.com.helper"])
+    git("--add", "credential.https://github.com.helper", "")
+    git("--add", "credential.https://github.com.helper", "!/usr/local/bin/fleet-token git-credential")
+    gh = Path.home() / ".local/bin/gh"
+    gh.parent.mkdir(parents=True, exist_ok=True)
+    # the real gh: the first on PATH outside ~/.local/bin (/usr/bin/gh on Arch,
+    # /run/current-system/sw/bin/gh on NixOS, where /usr/bin/gh does not exist)
+    real = next((w for d in os.get_exec_path() if Path(d) != gh.parent
+                 for w in [shutil.which("gh", path=d)] if w), "/usr/bin/gh")
+    gh.write_text('#!/bin/sh\n# gh as this bot\'s GitHub App (fleet-token setup)\n'
+                  f'GH_TOKEN=$(/usr/local/bin/fleet-token) || exit 1\nexport GH_TOKEN\nexec {real} "$@"\n')
+    gh.chmod(0o755)
+    print(f"git and gh act as {slug}[bot] now. ~/.local/bin must come before /usr/bin in PATH.")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print(token())
+    elif len(args) == 2 and args[0] == "--app" and args[1] and "/" not in args[1]:
+        print(token(args[1]))
+    elif args == ["setup"]:
+        setup()
+    elif args[:1] == ["git-credential"]:
+        if args[1:] == ["get"]:
+            req = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l)
+            if req.get("host") == "github.com":
+                print(f"username=x-access-token\npassword={token()}")
+    else:
+        sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except urllib.error.HTTPError as e:
+        sys.exit(f"fleet-token: GitHub answered {e.code} {e.reason} for {e.url} (App ID, key, installation?)")
+    except FileNotFoundError as e:
+        sys.exit(f"fleet-token: {e.filename} is missing (see fleet-token --help)")

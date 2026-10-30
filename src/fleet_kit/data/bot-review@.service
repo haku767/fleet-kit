@@ -1,0 +1,17 @@
+[Unit]
+Description=one headless review round of the plan bot %i (fleet-kit)
+Documentation=https://github.com/haku767/fleet-kit
+ConditionPathExists={home_root}/%i/.local/bin/claude
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=%i
+WorkingDirectory={home_root}/%i
+# bot-review sets HOME, PATH and the rest itself; the log is its own ({home_root}/%i/log/)
+# BOT_REVIEW_MAX, BOT_REVIEW_TURNS, BOT_REVIEW_BUDGET in /etc/default/bot-review change the caps
+EnvironmentFile=-/etc/default/bot-review
+ExecStart=/usr/local/bin/bot-review
+TimeoutStartSec=1h30m
+Nice=10

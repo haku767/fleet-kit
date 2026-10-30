@@ -1,0 +1,17 @@
+[Unit]
+Description=one headless round of the dev bot %i (fleet-kit)
+Documentation=https://github.com/haku767/fleet-kit
+ConditionPathExists={home_root}/%i/.local/bin/claude
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=%i
+WorkingDirectory={home_root}/%i
+# bot-round sets HOME, PATH and the rest itself; the log is its own ({home_root}/%i/log/)
+# BOT_ROUND_MAX=<n> in /etc/default/bot-round changes the worktree cap without a new install
+EnvironmentFile=-/etc/default/bot-round
+ExecStart=/usr/local/bin/bot-round
+TimeoutStartSec=2h30m
+Nice=10
