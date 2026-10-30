@@ -270,14 +270,14 @@ def check_status(host, agents_dir, name, kind, every_s, paused, where):
     return Finding("ok", where, f"last round {int(age // 60)} min ago, {d.get('outcome', '?')}")
 
 
-def check_inbox(host, agents_dir, name, guards, where):
+def check_inbox(host, agents_dir, name, account, guards, where):
     p = host.path(f"{agents_dir}/inbox/{name}")
     if not p.is_dir():
         return Finding("fail", where, f"{agents_dir}/inbox/{name} is missing: nobody can write to {name} (install-accounts.sh inbox)")
     owner = host.owner(p)
     notes = []
-    if owner != name and owner not in guards:
-        notes.append(f"owned by {owner}, not the recipient or a guard")
+    if owner not in (name, account) and owner not in guards:
+        notes.append(f"owned by {owner}, not the recipient ({account}) or a guard")
     if not (p / "done").is_dir():
         notes.append("no done/ directory")
     waiting = [f for f in p.iterdir() if f.is_file() and not f.name.startswith(".")]
@@ -360,9 +360,9 @@ def run(doc, machine=None, root="/", systemctl=None, user_of=None, owner_of=None
     out.append(check_lists(host, m, rendered, machine))
     out += check_scripts(host, m)
     # every bot and guard of the fleet has an inbox here: the courier carries the notes across
-    names = [b["name"] for *_, b, _a, _m in fl.bots()] + sorted(guards)
-    for name in names:
-        out.append(check_inbox(host, agents_dir, name, guards, f"inbox:{name}"))
+    accounts = {b["name"]: a for *_, b, a, _m in fl.bots()}
+    for name in list(accounts) + sorted(guards):
+        out.append(check_inbox(host, agents_dir, name, accounts.get(name, name), guards, f"inbox:{name}"))
     out += check_agents(host, agents_dir, machine, m.get("guard"))
     out.append(check_rules(host))
     return out

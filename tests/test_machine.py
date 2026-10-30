@@ -196,6 +196,11 @@ class MachineTests(unittest.TestCase):
         self.assertIn("5 days", x.message)
         w.owners[str(w.p("/srv/agents/inbox/myapp-dev"))] = "somebody"
         self.assertIn("owned by somebody", where(w.run(), "inbox:myapp-dev")[0].message)
+        # a bot whose account differs from its name: the account owns the inbox
+        w.doc["projects"]["myapp"]["dev"]["account"] = "dev-acct"
+        w.users["dev-acct"] = "/srv/myapp-dev"
+        w.owners[str(w.p("/srv/agents/inbox/myapp-dev"))] = "dev-acct"
+        self.assertEqual(where(w.run(), "inbox:myapp-dev")[0].level, "ok")
         shutil.rmtree(w.p("/srv/agents/inbox/myapp-dev"))
         self.assertEqual(where(w.run(), "inbox:myapp-dev")[0].level, "fail")
 
