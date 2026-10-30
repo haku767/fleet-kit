@@ -146,6 +146,15 @@ def project_checks(gh, caller, doc, pname):
     try:
         info = gh.get(f"repos/{repo}")
     except GHError as e:
+        # a repository under another owner is invisible to the fleet owner's tokens: the doctor
+        # runs with one token, so that is a skip naming the token to run with, not a fault; a
+        # repository under the fleet's own owner that cannot be seen is a fault
+        invisible = "Not Found" in str(e) or "not accessible" in str(e)
+        if invisible and repo.split("/")[0].lower() != (owner or "").lower():
+            app = p.get("owner_app")
+            how = (f"GH_TOKEN=$(fleet-token --app {app}) fleet doctor {pname}" if app else
+                   f"a token that sees {repo.split('/')[0]}'s repositories, then fleet doctor {pname}")
+            return [Finding("skip", pname, f"{repo} is under another owner and this token cannot see it: run {how}")]
         return [Finding("fail", pname, f"{repo}: {e}")]
     out.append(Finding("ok", pname, f"{repo} reachable, default branch {info.get('default_branch')}"
                + (", archived!" if info.get("archived") else "")))
