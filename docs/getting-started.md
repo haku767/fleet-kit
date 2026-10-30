@@ -2,7 +2,7 @@
 
 What haku's fleet does, in the order you would build it, with the `fleet` command where it
 helps. It is written for the next person (the first was Erik, 2026-10), from ws-guard's German
-guide of 2026-10-27, and it says plainly where the kit still stops. Status: 2026-10-29,
+guide of 2026-10-27, and it says plainly where the kit still stops. Status: 2026-10-30,
 fleet PLANS 13 stage 4.
 
 ## What a fleet is
@@ -39,8 +39,8 @@ Three principles hold it together:
 | the account lists the install script reads | `fleet apply lists` (`/etc/fleet/lists.sh`) |
 | labels and the ruleset in each repository | `fleet labels`, `fleet ruleset` (compare, `--apply` writes) |
 | a new project or bot in the file, and the steps that remain by hand | `fleet add-project`, `fleet add-bot` |
-| a daily check of GitHub against the file | `fleet doctor` (the machine half is coming) |
-| the round scripts `bot-round`, `bot-review`, the token helper `fleet-token`, the install script for accounts, units and timers | **not in the kit yet.** They live in haku's private dotfiles and read what the kit renders. Moving them here is the open decision of stage 4; until then ask haku for them, or write them from the description below (an afternoon). |
+| a daily check of GitHub and the machine against the file | `fleet doctor` |
+| the round scripts `bot-round`, `bot-review`, the token helper `fleet-token`, the install script for accounts, units and timers | **not in the kit yet.** They live in haku's private dotfiles and read what the kit renders. haku decided on 2026-10-29 that they move here (`scripts/`, `fleet apply scripts`), in the order ws-guard sets; until then ask haku for them, or write them from the description below (an afternoon). |
 | the page (collector and HTML) | haku's fleet repository (`dashboard/`), not in the kit yet |
 
 So today the kit carries the register and the GitHub side; the machine side still needs the
@@ -187,7 +187,11 @@ You merge what is approved. That is all of your part, and that is why the setup 
 One line per check: the repository reachable, labels and ruleset as the file says, each App
 with its permissions and installed where it should be (your login sees that; a bot's does
 not), every open `ready` set by someone trusted, the runner online. Exit 1 on a `fail`.
-The machine half (accounts, timers, status files, inboxes) is ws-guard's next piece.
+Then the machine half, for the host it runs on (or `--machine`) when that is a bots machine in
+the file: each bot's account, its `.conf`, `claude` and the App's key in its home (root sees
+them, a bot's run says `skip`), its timer, its status file, every inbox, the scripts and units.
+Run it as root on the bots machine for the full picture; as your login it still gives the
+GitHub half.
 
 ## Growing
 
