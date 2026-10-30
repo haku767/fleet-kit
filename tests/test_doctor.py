@@ -2,11 +2,20 @@ import pathlib
 import tomllib
 import unittest
 
-from fleet_kit import doctor, labels, ruleset
+from fleet_kit import doctor, labels, model, ruleset
 from fleet_kit.github import GHError
 
 HERE = pathlib.Path(__file__).resolve().parent
 MINIMAL = HERE.parent / "examples" / "minimal.toml"
+
+
+class UnusableGHTests(unittest.TestCase):
+    def test_no_token_is_one_skip(self):
+        _, doc = model.load(MINIMAL)
+        gh = FakeGH({"user": GHError("gh api GET user: To get started with GitHub CLI, please run:  gh auth login")})
+        f = doctor.run(gh, doc, ["myapp"])
+        self.assertEqual([x.level for x in f], ["skip"])
+        self.assertIn("gh has no token", f[0].message)
 
 
 class FakeGH:

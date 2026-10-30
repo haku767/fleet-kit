@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 
-from . import __version__, doctor, edit, labels, model, render, ruleset
+from . import __version__, doctor, edit, labels, machine, model, render, ruleset
 from .github import GH, GHError
 
 DEFAULT_CONF_DIR = "/etc/fleet/bots"
@@ -307,13 +307,23 @@ def cmd_doctor(args):
     names = projects_for(doc, args.project, "doctor")
     if names is None:
         return 1
-    findings = doctor.run(GH(), doc, names)
+    # the GitHub half; a machine without gh (or without a token) still gets the machine half
+    try:
+        github = doctor.run(GH(), doc, names)
+    except GHError as e:
+        github = [doctor.Finding("skip", "caller", f"GitHub half skipped: {e}")]
+    # the machine half, for this host or --machine, when it is a bots machine in the file
+    host = args.machine or os.uname().nodename
+    on_machine = machine.run(doc, host, root=args.root) if (host in (doc.get("machines") or {})) else \
+        [doctor.Finding("skip", "machine", f"this host is `{host}`, not a machine in the file; --machine names one")]
+    findings = github + on_machine
     for x in findings:
         if x.level != "ok" or args.verbose:
             print(x)
     n = {lv: sum(1 for x in findings if x.level == lv) for lv in ("ok", "warn", "fail", "skip")}
-    print(f"fleet doctor (GitHub): {len(findings)} checks: {n['ok']} ok, {n['warn']} warn, {n['fail']} fail, {n['skip']} skipped"
-          + ("" if args.verbose else "; -v lists the ok ones") + ". The machine half is not in the kit yet (PLANS 13 stage 3e).")
+    print(f"fleet doctor: {len(findings)} checks ({len(github)} GitHub, {len(on_machine)} on {host}): "
+          f"{n['ok']} ok, {n['warn']} warn, {n['fail']} fail, {n['skip']} skipped"
+          + ("" if args.verbose else "; -v lists the ok ones"))
     return 1 if n["fail"] else 0
 
 
@@ -375,10 +385,13 @@ def main(argv=None):
     ab.add_argument("--machine", help="the bot's machine when several have role bots")
     ab.add_argument("file", nargs="?", default="fleet.toml")
     ab.set_defaults(func=cmd_add_bot)
-    d = sub.add_parser("doctor", help="what is wrong on GitHub for a project: repository, labels, ruleset, Apps, installations, "
-                                      "who set ready, the runner (the machine half follows)")
+    d = sub.add_parser("doctor", help="what is wrong, on GitHub for a project (repository, labels, ruleset, Apps, installations, "
+                                      "who set ready, the runner) and on this machine (accounts, .conf files, scripts, "
+                                      "timers, status files, inboxes)")
     d.add_argument("project", nargs="?", default="all", help="a project from the file, or `all` (default)")
     d.add_argument("file", nargs="?", default="fleet.toml")
+    d.add_argument("--machine", help="the machine to check (default: this host's name; a machine not in the file is skipped)")
+    d.add_argument("--root", default="/", help=argparse.SUPPRESS)   # the tests' temporary root
     d.add_argument("-v", "--verbose", action="store_true", help="list the checks that are ok too")
     d.set_defaults(func=cmd_doctor)
     for name, help_ in (("status", "the page's lists in the terminal"), ("page", "install collector and page")):
