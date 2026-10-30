@@ -123,6 +123,19 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual([f.level for f in out[1:]], ["fail"])
         self.assertIn("Not Found", out[1].message)
 
+    def test_foreign_owner_repository_is_a_skip(self):
+        """A repository under another owner that the token cannot see: skip, naming the token to use."""
+        doc = tomllib.loads(MINIMAL.read_text())
+        doc["projects"]["myapp"]["repo"] = "Someone/their-app"
+        doc["projects"]["myapp"]["owner_app"] = "their"
+        out = doctor.run(FakeGH({}), doc, ["myapp"])
+        self.assertEqual([f.level for f in out[1:]], ["skip"])
+        self.assertIn("fleet-token --app their", out[1].message)
+        del doc["projects"]["myapp"]["owner_app"]
+        out = doctor.run(FakeGH({}), doc, ["myapp"])
+        self.assertEqual(out[1].level, "skip")
+        self.assertIn("Someone's repositories", out[1].message)
+
 
 if __name__ == "__main__":
     unittest.main()
