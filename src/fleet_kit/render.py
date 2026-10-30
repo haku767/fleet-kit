@@ -153,26 +153,46 @@ class Fleet:
         return p.get("test") or "; ".join(st["test"] for st in main if st.get("test")) or "the repository's checks"
 
 
+# what the rounds ran with before the file carried the values (haku's fleet); bot-round and
+# bot-review fall back to the same when a line is missing
+ROUND_DEFAULTS = {"every": "20m", "max_worktrees": 2, "max_turns": 150, "budget_usd": 10,
+                  "model_small": "claude-sonnet-5-5", "model_large": "claude-opus-5-5"}
+REVIEW_DEFAULTS = {"every": "20m", "max_per_pr": 3, "max_turns": 60, "budget_usd": 5,
+                   "model_small": "claude-sonnet-5-5", "model_large": "claude-opus-5-5"}
+
+
 def conf(fl, pname, p, kind, b, account, machine):
     repo = p.get("repo", "")
     home, _ = fl.paths(machine, account)
+    m = fl.machines.get(machine) or {}
     lines = [HEADER.format(account=account, fleet=fl.fleet.get("name", "")).rstrip("\n")]
     common = [("kind", kind), ("project", pname), ("name", b["name"]), ("account", account),
               ("machine", machine or ""), ("paused", "yes" if p.get("paused") else "no"), ("repo", repo),
-              ("dir", f"{home}/{repo.rsplit('/', 1)[-1]}")]
+              ("dir", f"{home}/{repo.rsplit('/', 1)[-1]}"),
+              # the fleet around the bot: who decides, who gets the round's notes, where the
+              # inboxes and status files are (bot-round, bot-review)
+              ("owner", fl.owner), ("guard", m.get("guard", "")), ("agents_dir", fl.fleet.get("agents_dir", "/srv/agents"))]
     for k, v in common:
         lines.append(f"{k}={q(v)}")
+    defaults = fl.doc.get("defaults") or {}
     if kind == "dev":
         lines += [f"app={q(fl.app(b))}", f"trusted={q(fl.trusted(p))}", f"test_cmd={q(fl.test_cmd(p))}",
                   f"test_cmd_nix={q(fl.test_cmd_addon(p))}", f"allow={q(fl.allow(p))}"]
-        env = fl.env(p, machine, account)
-        if env:
-            lines.append("export " + " ".join(f"{k}={q(v)}" for k, v in env.items()))
+        knobs = dict(ROUND_DEFAULTS, **(defaults.get("round") or {}))
     else:
         dev = p.get("dev") if isinstance(p.get("dev"), dict) else None
         lines += [f"app={q(fl.app(dev) if dev else '')}", f"reviewer={q(fl.app(b) + '[bot]')}",
                   f"ci={q(p.get('ci', 'yes'))}", f"ci_checks={q(fl.ci_checks(p))}",
                   f"review_note={q(p.get('review_note', ''))}"]
+        knobs = dict(REVIEW_DEFAULTS, **(defaults.get("review") or {}))
+    if b.get("budget_usd") is not None:
+        knobs["budget_usd"] = b["budget_usd"]
+    # [defaults.round] / [defaults.review], a bot's own budget over them: the round's knobs
+    lines += [f"{k}={q(knobs[k])}" for k in (ROUND_DEFAULTS if kind == "dev" else REVIEW_DEFAULTS)]
+    if kind == "dev":
+        env = fl.env(p, machine, account)
+        if env:
+            lines.append("export " + " ".join(f"{k}={q(v)}" for k, v in env.items()))
     return "\n".join(lines) + "\n"
 
 

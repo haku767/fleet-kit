@@ -1,0 +1,11 @@
+[Unit]
+Description=plan bot %i: a review round every 20 minutes (fleet-kit)
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=20min
+RandomizedDelaySec=2min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

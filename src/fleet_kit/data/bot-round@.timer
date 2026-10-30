@@ -1,0 +1,11 @@
+[Unit]
+Description=dev bot %i: a round every 20 minutes (fleet-kit)
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=20min
+RandomizedDelaySec=2min
+Persistent=false
+
+[Install]
+WantedBy=timers.target
