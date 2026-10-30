@@ -1,7 +1,7 @@
 # Getting started: a fleet of your own
 
 What haku's fleet does, in the order you would build it, with the `fleet` command where it
-helps. It is written for the next person (the first was Erik, 2026-10), from ws-guard's German
+helps. It is written for the next person, from the fleet's own German
 guide of 2026-10-27, and it says plainly where the kit still stops. Status: 2026-10-30 evening,
 fleet PLANS 13 stage 3 complete, stage 4 running.
 

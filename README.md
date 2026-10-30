@@ -61,5 +61,5 @@ or `pip install -e .` for the `fleet` command. Tests: `python3 -m unittest disco
 - `examples/minimal.toml`: the smallest fleet.
 - `tests/`: unittest, no fixtures beyond the example.
 
-Maintained by the two guards of haku's fleet (tx13-guard, ws-guard) through pull requests;
+Maintained by the two guards of haku's fleet through pull requests;
 haku merges. MIT, see `LICENSE`.

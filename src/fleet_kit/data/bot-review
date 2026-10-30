@@ -1,6 +1,6 @@
 #!/bin/sh
 # bot-review: one headless review round of a plan bot (fleet-kit; written for haku's fleet, fleet
-# PLANS 7, stage 4, tx13-guard 2026-10-11, in the kit since PLANS 13 stage 4). Runs as the plan
+# PLANS 7, stage 4, 2026-10-11; in the kit since PLANS 13 stage 4). Runs as the plan
 # bot, from bot-review@<bot>.timer (`fleet apply rounds` installs script and units, root-owned):
 #   bot-review              one round: review the next open pull request of the project's dev bot
 #   bot-review status       which pull requests the rounds reviewed, how often, with what verdict
