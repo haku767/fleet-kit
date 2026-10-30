@@ -41,15 +41,22 @@ class Target:
         self._systemctl = systemctl
         self.dry_run = dry_run
         self.is_root = os.geteuid() == 0
+        self.trial = False   # set when a trial root kept systemctl from running
 
     def path(self, p):
         return self.root / str(p).lstrip("/")
 
     def systemctl(self, *args):
-        if self.dry_run:
+        """`show` is read-only and runs in a dry run too; daemon-reload, enable, disable and
+        start do not. A trial root (--dir) never talks to the real systemd: without a fake it
+        sees no units and changes none (the summary says so)."""
+        if self.dry_run and args[0] != "show":
             return ""
         if self._systemctl is not None:
             return self._systemctl(list(args))
+        if self.root != Path("/"):
+            self.trial = True
+            return ""
         try:
             return subprocess.run(["systemctl", *args], capture_output=True, text=True, timeout=60).stdout
         except (OSError, subprocess.TimeoutExpired):
@@ -88,13 +95,14 @@ class Target:
 
     def ensure_dir(self, rel, mode, user=None, group=None):
         p = self.path(rel)
-        if p.is_dir() and stat.S_IMODE(p.stat().st_mode) == mode:
+        was = p.is_dir()
+        if was and stat.S_IMODE(p.stat().st_mode) == mode:
             return "kept"
         if not self.dry_run:
             p.mkdir(parents=True, exist_ok=True)
             os.chmod(p, mode)
             self.chown(p, user, group)
-        return "added"
+        return "changed" if was else "added"
 
 
 def group_of(t, rel, fallback="root"):
@@ -153,4 +161,6 @@ def apply(doc, machine, root="/", dry_run=False, systemctl=None, start=False):
             out.append(("started", unit))
         elif not active:
             out.append(("kept", f"{unit} not started: systemctl start {unit} when the first round by hand was good, or --start"))
+    if t.trial:
+        out.append(("skipped", f"trial root {t.root}: systemctl not called, no unit seen, enabled or started"))
     return out

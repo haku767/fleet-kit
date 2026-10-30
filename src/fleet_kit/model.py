@@ -27,7 +27,7 @@ SECRET = re.compile(
 KEYS = {
     "fleet": {"name", "owner", "agents_dir", "trailers", "rules"},
     "defaults.round": {"every", "max_worktrees", "max_turns", "budget_usd", "model_small", "model_large"},
-    "defaults.review": {"every", "max_per_pr", "max_turns"},
+    "defaults.review": {"every", "max_per_pr", "max_turns", "budget_usd", "model_small", "model_large"},
     "defaults.page": {"budget_dev_usd", "budget_plan_usd", "collect_every"},
     "machine": {"role", "family", "home_root", "scratch_root", "page", "guard", "courier"},
     "stack": {"test", "allow", "env", "note"},
