@@ -36,9 +36,14 @@ class Caller:
     def __init__(self, gh):
         self.gh = gh
         self._installations = None
+        self.unusable = None   # the GHError when gh itself cannot talk to GitHub (no token, not installed)
         try:
             self.login = gh.get("user")["login"]
-        except (GHError, KeyError, TypeError):
+        except GHError as e:
+            self.login = None
+            if any(k in str(e) for k in ("gh auth login", "GH_TOKEN", "not installed")):
+                self.unusable = e
+        except (KeyError, TypeError):
             self.login = None
 
     def installations(self):
@@ -198,6 +203,9 @@ def guard_checks(gh, caller, doc):
 
 def run(gh, doc, names):
     caller = Caller(gh)
+    if caller.unusable:
+        return [Finding("skip", "caller", f"GitHub half skipped, gh has no token here: {caller.unusable} "
+                                          "(run as a login with gh auth, or with GH_TOKEN from fleet-token)")]
     out = [Finding("ok", "caller", f"running as {caller.login}" if caller.login else
                    "running as an App token: installations and runners are skipped (run as the owner for those)")]
     for pname in names:
