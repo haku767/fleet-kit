@@ -10,7 +10,7 @@ exist so the tests run in a temporary directory without root and without systemd
 imports the GitHub side: a machine without `gh` still gets this half.
 
 What stays with a machine's guard, not here: disks, the GPU, ports, backups, units outside the
-fleet, big files in homes, the LOG (ws-guard-check on ws-msi)."""
+fleet, big files in homes, the LOG (the machine's own check)."""
 
 import json
 import os

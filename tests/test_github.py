@@ -40,7 +40,7 @@ class LabelTests(unittest.TestCase):
         want = {l["name"]: l for l in labels.desired(doc, "myapp")}
         self.assertEqual(want["ready"]["description"], "Acceptance criteria set; myapp-dev may build it")
         self.assertEqual(want["next"]["description"], "The ready issue to build first; set by myapp-plan")
-        self.assertIn("ErikNeu777", want["needs-haku"]["description"])
+        self.assertIn("example", want["needs-haku"]["description"])
         self.assertEqual(want["bot:myapp-dev"]["description"], "written by or for the bot myapp-dev")
         self.assertEqual(len(want), len(labels.DEFAULT_LABELS) - 1 + 2)
 
@@ -74,13 +74,13 @@ class LabelTests(unittest.TestCase):
         lines = labels.describe(pl)
         self.assertTrue(any("name 'Ready' -> 'ready'" in x and "description 'old words' ->" in x for x in lines))
         gh = FakeGH({})
-        n = labels.apply(gh, "ErikNeu777/myapp", pl)
+        n = labels.apply(gh, "example/myapp", pl)
         self.assertEqual(n, len(want) - 1)
-        self.assertEqual(gh.calls[-1][:2], ("PATCH", "repos/ErikNeu777/myapp/labels/Ready"))
+        self.assertEqual(gh.calls[-1][:2], ("PATCH", "repos/example/myapp/labels/Ready"))
         self.assertEqual(gh.calls[-1][2]["new_name"], "ready")
         posts = [c for c in gh.calls if c[0] == "POST"]
-        self.assertTrue(all(c[1] == "repos/ErikNeu777/myapp/labels" for c in posts))
-        self.assertIn("repos/ErikNeu777/myapp/labels", [c[1] for c in posts])
+        self.assertTrue(all(c[1] == "repos/example/myapp/labels" for c in posts))
+        self.assertIn("repos/example/myapp/labels", [c[1] for c in posts])
         colon = [c for c in gh.calls if "%3A" in c[1]]
         self.assertEqual(colon, [])   # creating sends the name in the body; only PATCH quotes the path
 

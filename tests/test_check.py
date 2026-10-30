@@ -23,7 +23,7 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(len(model.bots(doc)), 2)
 
     def test_missing_owner_and_repo_shape(self):
-        text = MINIMAL.read_text().replace('owner = "ErikNeu777"', "").replace("ErikNeu777/myapp", "myapp")
+        text = MINIMAL.read_text().replace('owner = "example"', "").replace("example/myapp", "myapp")
         e = errors(check_text(text))
         self.assertTrue(any("fleet.owner" in x for x in e))
         self.assertTrue(any("repo must be owner/name" in x for x in e))
@@ -94,13 +94,13 @@ class RenderTests(unittest.TestCase):
         self.assertIn("machines/box/lists.sh", files)
         dev = files["bots/myapp-dev.conf"]
         self.assertIn("kind='dev'", dev)
-        self.assertIn("trusted='ErikNeu777 ErikNeu777-myapp-plan[bot]'", dev)
+        self.assertIn("trusted='example example-myapp-plan[bot]'", dev)
         self.assertIn("Bash(uv sync*)", dev)
         self.assertIn("export UV_CACHE_DIR='/data/myapp-dev/uv-cache'", dev)
         self.assertIn("While the repository has no CI", dev)
         plan = files["bots/myapp-plan.conf"]
-        self.assertIn("app='ErikNeu777-myapp-dev'", plan)
-        self.assertIn("reviewer='ErikNeu777-myapp-plan[bot]'", plan)
+        self.assertIn("app='example-myapp-dev'", plan)
+        self.assertIn("reviewer='example-myapp-plan[bot]'", plan)
         self.assertIn("round_bots='myapp-dev'", files["machines/box/lists.sh"])
         self.assertIn("review_bots='myapp-plan'", files["machines/box/lists.sh"])
 

@@ -166,7 +166,7 @@ def apply_accounts(doc, machine, root="/", dry_run=False, run=None, user_exists=
     if not s.group(GROUP):
         s.run("groupadd", GROUP)
         out.append(("added", f"group {GROUP}"))
-    # the shared directories keep the owner they have (on ws-msi /srv/agents is hakuws's since
+    # the shared directories keep the owner they have (on haku's bots machine the agents directory is the admin's since
     # the agents phase); the mode is the kit's
     out.append((s.ensure_dir(agents_dir, 0o2775, "root", GROUP, fix_owner=False), f"{agents_dir} (2775, group {GROUP})"))
     for sub in ("inbox", "status"):

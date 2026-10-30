@@ -127,7 +127,7 @@ class RoundsTests(unittest.TestCase):
         """bot-round and bot-review source the rendered .conf: the knobs arrive as variables."""
         files = render.render(load())
         dev = files["bots/myapp-dev.conf"]
-        for k in ("owner='ErikNeu777'", "guard=''", "agents_dir='/srv/agents'", "max_worktrees='2'", "model_small='claude-sonnet-5-5'"):
+        for k in ("owner='example'", "guard=''", "agents_dir='/srv/agents'", "max_worktrees='2'", "model_small='claude-sonnet-5-5'"):
             self.assertIn(k, dev)
         plan = files["bots/myapp-plan.conf"]
         self.assertIn("max_per_pr='3'", plan)
@@ -136,7 +136,7 @@ class RoundsTests(unittest.TestCase):
         block = script[script.index("owner=${owner:-"):script.index("model_s=")] + script[script.index("model_s="):].split("\n", 1)[0]
         r = subprocess.run(["sh", "-c", dev + block + '\nprintf "%s %s %s %s" "$owner" "$max" "$budget" "$model_m"'],
                            capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"})
-        self.assertEqual(r.stdout, "ErikNeu777 2 10 claude-opus-5-5")
+        self.assertEqual(r.stdout, "example 2 10 claude-opus-5-5")
         r = subprocess.run(["sh", "-c", dev + block + '\nprintf "%s" "$max"'],
                            capture_output=True, text=True, env={"PATH": "/usr/bin:/bin", "BOT_ROUND_MAX": "5"})
         self.assertEqual(r.stdout, "5")   # /etc/default/bot-round still wins

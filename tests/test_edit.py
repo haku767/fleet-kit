@@ -54,8 +54,8 @@ class EditTests(unittest.TestCase):
 
     def test_insert_project_at_the_end_without_guards(self):
         text = MINIMAL.read_text()
-        out = edit.insert_project(text, edit.project_block("z", {"repo": "ErikNeu777/z", "stacks": ["python-uv"]}))
-        self.assertTrue(out.endswith('[projects.z]\nrepo = "ErikNeu777/z"\nstacks = ["python-uv"]\n'))
+        out = edit.insert_project(text, edit.project_block("z", {"repo": "example/z", "stacks": ["python-uv"]}))
+        self.assertTrue(out.endswith('[projects.z]\nrepo = "example/z"\nstacks = ["python-uv"]\n'))
         self.assertEqual(list(tomllib.loads(out)["projects"]), ["myapp", "z"])
 
     def test_insert_bot_lands_in_its_project(self):
@@ -68,11 +68,11 @@ class EditTests(unittest.TestCase):
             edit.insert_bot(WITH_GUARDS, "nope", "plan", {"name": "x"})
 
     def test_steps_mention_apps_labels_and_a_foreign_owner(self):
-        text = MINIMAL.read_text().replace("ErikNeu777/myapp", "Other/myapp")
+        text = MINIMAL.read_text().replace("example/myapp", "Other/myapp")
         doc = tomllib.loads(text)
         lines = edit.github_steps(doc, "myapp", ["plan", "dev"], "box")
         joined = "\n".join(lines)
-        self.assertIn("`ErikNeu777-myapp-plan`, `ErikNeu777-myapp-dev`", joined)
+        self.assertIn("`example-myapp-plan`, `example-myapp-dev`", joined)
         self.assertIn("Other's account (Other installs it)", joined)
         self.assertIn("fleet labels myapp --apply", joined)
         self.assertNotIn("fleet ruleset", joined)
@@ -91,13 +91,13 @@ class CliEditTests(unittest.TestCase):
             f = os.path.join(d, "fleet.toml")
             shutil.copy(MINIMAL, f)
             os.chmod(f, 0o664)
-            rc, out, err = self.run_cli(["add-project", "tool", "--repo", "ErikNeu777/tool", "--stack", "python-uv",
+            rc, out, err = self.run_cli(["add-project", "tool", "--repo", "example/tool", "--stack", "python-uv",
                                          "--reviews", "1", "--no-plan", f])
             self.assertEqual(rc, 0, err)
-            self.assertIn("appended [projects.tool] (ErikNeu777/tool, bots tool-dev)", out)
+            self.assertIn("appended [projects.tool] (example/tool, bots tool-dev)", out)
             self.assertIn("fleet ruleset tool --apply", out)
             self.assertEqual(oct(os.stat(f).st_mode & 0o777), "0o664")
-            rc, out, err = self.run_cli(["add-project", "tool", "--repo", "ErikNeu777/tool", "--stack", "python-uv", f])
+            rc, out, err = self.run_cli(["add-project", "tool", "--repo", "example/tool", "--stack", "python-uv", f])
             self.assertEqual(rc, 1)
             self.assertIn("in the file already", err)
             rc, out, err = self.run_cli(["add-bot", "tool", "plan", "--persona", "Kiri", f])
@@ -114,12 +114,12 @@ class CliEditTests(unittest.TestCase):
             f = os.path.join(d, "fleet.toml")
             shutil.copy(MINIMAL, f)
             before = open(f).read()
-            rc, out, err = self.run_cli(["add-project", "tool", "--repo", "ErikNeu777/tool", "--stack", "nope", f])
+            rc, out, err = self.run_cli(["add-project", "tool", "--repo", "example/tool", "--stack", "nope", f])
             self.assertEqual(rc, 1)
             self.assertIn("stack `nope`", err)
             self.assertIn("nothing written", err)
             self.assertEqual(open(f).read(), before)
-            rc, out, err = self.run_cli(["add-project", "tool", "--repo", "ErikNeu777/tool", "--stack", "python-uv",
+            rc, out, err = self.run_cli(["add-project", "tool", "--repo", "example/tool", "--stack", "python-uv",
                                          "--dev", "myapp-dev", f])
             self.assertEqual(rc, 1)
             self.assertIn("already used", err)
