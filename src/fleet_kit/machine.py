@@ -25,7 +25,7 @@ from .doctor import Finding
 
 CONF_DIR = "/etc/fleet/bots"
 LISTS = "/etc/fleet/lists.sh"
-SCRIPTS = ("/usr/local/bin/bot-round", "/usr/local/bin/bot-review")
+SCRIPTS = ("/usr/local/bin/bot-round", "/usr/local/bin/bot-review", "/usr/local/bin/fleet-token")
 UNITS = tuple(f"/etc/systemd/system/{u}" for u in
               ("bot-round@.service", "bot-round@.timer", "bot-review@.service", "bot-review@.timer"))
 DEFAULTS_FILE = "/etc/default/bot-round"
@@ -167,7 +167,7 @@ def check_conf(host, rendered, acct, kind, where):
     if not p.is_file():
         return Finding("fail", where, f"{CONF_DIR}/{acct}.conf is missing: the round exits 2 (fleet apply conf, as root)")
     if not (mode_ok(host, p) and mode_ok(host, p.parent)):
-        return Finding("fail", where, f"{p.relative_to(host.root)}: must be root's and not writable by others, "
+        return Finding("fail", where, f"{CONF_DIR}/{acct}.conf: must be root's and not writable by others, "
                                       "like its directory; the scripts refuse it")
     text = p.read_text()
     if f"kind='{kind}'" not in text:
@@ -208,7 +208,7 @@ def check_scripts(host, m):
     if not host.path(DEFAULTS_FILE).is_file():
         out.append(Finding("warn", "scripts", f"{DEFAULTS_FILE} is missing (BOT_ROUND_MAX; install-accounts.sh rounds writes it)"))
     if not out:
-        out.append(Finding("ok", "scripts", "bot-round, bot-review and their four units are installed, root's"))
+        out.append(Finding("ok", "scripts", "bot-round, bot-review, fleet-token and the four units are installed, root's"))
     return out
 
 
@@ -280,7 +280,12 @@ def check_inbox(host, agents_dir, name, account, guards, where):
         notes.append(f"owned by {owner}, not the recipient ({account}) or a guard")
     if not (p / "done").is_dir():
         notes.append("no done/ directory")
-    waiting = [f for f in p.iterdir() if f.is_file() and not f.name.startswith(".")]
+    try:
+        waiting = [f for f in p.iterdir() if f.is_file() and not f.name.startswith(".")]
+    except PermissionError:
+        # 1730: a member of the group may drop a note, not list the inbox; root and the recipient see the count
+        return Finding("skip", where, f"{agents_dir}/inbox/{name}: in place, not listable by this caller (1730; root sees the count)"
+                       + ("; " + "; ".join(notes) if notes else ""))
     oldest = max((host.age(f) for f in waiting), default=0)
     if oldest > INBOX_OLD_S:
         notes.append(f"{len(waiting)} note(s) waiting, the oldest {int(oldest // 86400)} days")
