@@ -210,6 +210,15 @@ class MachineTests(unittest.TestCase):
         shutil.rmtree(w.p("/srv/agents/inbox/myapp-dev"))
         self.assertEqual(where(w.run(), "inbox:myapp-dev")[0].level, "fail")
 
+    def test_inbox_not_listable_is_a_skip(self):
+        w = self.world()
+        d = w.p("/srv/agents/inbox/myapp-plan")
+        os.chmod(d, 0o330)
+        self.addCleanup(os.chmod, d, 0o750)   # runs before the world's cleanup
+        x = where(w.run(), "inbox:myapp-plan")[0]
+        self.assertEqual(x.level, "skip")
+        self.assertIn("not listable", x.message)
+
     def test_home_details_and_tokens(self):
         w = self.world()
         os.remove(w.p("/var/lib/systemd/linger/myapp-dev"))
