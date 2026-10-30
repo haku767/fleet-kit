@@ -5,8 +5,8 @@ in haku767/fleet says how to make the App).
 Installed root-owned in /usr/local/bin by `fleet apply rounds`. Per bot account:
   ~/.config/fleet/app-id    the App's ID (GitHub: the App's settings page, "App ID")
   ~/.config/fleet/app.pem   its private key
-  ~/.config/fleet/<name>/   the same for a second App of this bot (ws-guard's App for Jalelu/Kami,
-                            a private App in Jalelu's account like Kami's own bots', 2026-10-14)
+  ~/.config/fleet/<name>/   the same for a second App of this bot (a guard's App for a project
+                            under another owner: a private App in that owner's account)
   ~/.config/fleet/app.pem   the App's private key, mode 600
 
   fleet-token                     print an installation token (valid for an hour, cached): the

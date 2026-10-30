@@ -1,6 +1,6 @@
 #!/bin/sh
 # bot-round: one headless round of a dev bot (fleet-kit; written for haku's fleet, fleet PLANS 7,
-# stage 2, tx13-guard 2026-10-07, in the kit since PLANS 13 stage 4). Runs as the bot, from
+# stage 2, 2026-10-07; in the kit since PLANS 13 stage 4). Runs as the bot, from
 # bot-round@<bot>.timer (`fleet apply rounds` installs script and units, root-owned):
 #   bot-round            one round: tidy, then build the next ready issue if there is room
 #   bot-round status     what is in work/ and why
@@ -120,7 +120,7 @@ started=$(date -u +%FT%TZ) outcome=running what= cost=0 turns=0 signed_in=true
 status_write() {
   [ -d "$status_dir" ] || return 0
   # the bot's own inbox count travels with the status: only the recipient may list its inbox
-  # (the collector on ws-msi cannot, PLANS 9)
+  # (the page's collector cannot)
   inbox_n=$(find "$agents_dir/inbox/$name" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l)
   jq -n --arg bot "$name" --arg kind round --arg started "$started" --arg ended "$(date -u +%FT%TZ)" \
      --arg outcome "$outcome" --arg what "$what" --argjson cost "$cost" --argjson turns "$turns" \
@@ -136,7 +136,7 @@ cd "$dir"
 # resolves the repository from the remote URL and then does the wrong thing (2026-10-07, #26:
 # the pull request became an issue)
 git remote set-url origin "https://github.com/$repo.git"
-# no GitHub, no round (tx13 lost its uplink four times on 2026-10-07/08); the timer comes back
+# no GitHub, no round (a laptop loses its uplink now and then); the timer comes back
 git fetch -q origin || { say "git fetch failed (network?), nothing done this round"; outcome=offline; exit 0; }
 # the default branch, where branches start and pull requests go: main for wingshell, master for
 # lora-studio (the first studio round died on origin/main, 2026-10-14); origin/HEAD knows it

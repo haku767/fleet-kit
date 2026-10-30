@@ -3,7 +3,7 @@
 
 [fleet]
 name = "erik"
-owner = "ErikNeu777"                 # merges, sets ready anywhere, decides
+owner = "example"                 # merges, sets ready anywhere, decides
 
 [machines.box]
 role = "bots"
@@ -20,7 +20,7 @@ env = { UV_CACHE_DIR = "{scratch}/uv-cache", UV_LINK_MODE = "copy" }
 # size:S/M/L, bot:<name>). `reviews = 1` would ask for a ruleset on main (`fleet ruleset myapp`).
 
 [projects.myapp]
-repo = "ErikNeu777/myapp"
+repo = "example/myapp"
 stacks = ["python-uv"]
 ci = "auto"                          # yes | no | auto: auto looks for .github/workflows
 plan = { name = "myapp-plan" }
