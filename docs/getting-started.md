@@ -2,8 +2,8 @@
 
 What haku's fleet does, in the order you would build it, with the `fleet` command where it
 helps. It is written for the next person (the first was Erik, 2026-10), from ws-guard's German
-guide of 2026-10-27, and it says plainly where the kit still stops. Status: 2026-10-30,
-fleet PLANS 13 stage 4.
+guide of 2026-10-27, and it says plainly where the kit still stops. Status: 2026-10-30 evening,
+fleet PLANS 13 stage 3 complete, stage 4 running.
 
 ## What a fleet is
 
@@ -36,15 +36,16 @@ Three principles hold it together:
 |---|---|
 | one file with every fact about the fleet | `fleet.toml`, this kit; `fleet check` validates it |
 | the per-bot configuration the round scripts read | `fleet render`, `fleet apply conf` (`/etc/fleet/bots/<account>.conf`) |
-| the account lists the install script reads | `fleet apply lists` (`/etc/fleet/lists.sh`) |
+| the account lists a machine's own install script reads | `fleet apply lists` (`/etc/fleet/lists.sh`) |
 | labels and the ruleset in each repository | `fleet labels`, `fleet ruleset` (compare, `--apply` writes) |
 | a new project or bot in the file, and the steps that remain by hand | `fleet add-project`, `fleet add-bot` |
 | a daily check of GitHub and the machine against the file | `fleet doctor` |
-| the round scripts `bot-round`, `bot-review`, the token helper `fleet-token`, the install script for accounts, units and timers | **not in the kit yet.** They live in haku's private dotfiles and read what the kit renders. haku decided on 2026-10-29 that they move here (`scripts/`, `fleet apply scripts`), in the order ws-guard sets; until then ask haku for them, or write them from the description below (an afternoon). |
+| the bots' Unix accounts, homes, scratch directories, the inboxes with their ACLs | `fleet apply accounts`, `fleet apply inbox` (arch family, root; NixOS declares them in its module) |
+| the round scripts `bot-round`, `bot-review`, the token helper `fleet-token`, the units and timers | `fleet apply rounds` installs the kit's own (`src/fleet_kit/data`, MIT, from haku's fleet) root-owned and enables the timers |
 | the page (collector and HTML) | haku's fleet repository (`dashboard/`), not in the kit yet |
 
-So today the kit carries the register and the GitHub side; the machine side still needs the
-scripts.
+So since 2026-10-30 the kit carries the register, the GitHub side and the machine side of a
+fleet; what stays outside is a machine's own (ssh keys, sudoers, deploy wrappers) and the page.
 
 ## Prerequisites
 
@@ -116,11 +117,16 @@ Why not everything under your user: then every bot reads every key and can kill 
 bot; with own accounts the kernel keeps them apart and every log line, commit and file says
 who it was.
 
-The kit gives the lists and the per-bot configuration; the accounts themselves are still the
-install script's (see above):
+The kit does that, as root, idempotent, each with `--dry-run` first:
 
-    sudo fleet apply lists fleet.toml   # /etc/fleet/lists.sh: bots, round_bots, review_bots, paused_bots
-    sudo fleet apply conf fleet.toml    # /etc/fleet/bots/<account>.conf, one per bot
+    sudo fleet apply accounts fleet.toml   # agents group and directory, an account per bot, home 750, linger, ~/agents, scratch
+    sudo fleet apply inbox fleet.toml      # /srv/agents/inbox/<name>/ per bot, 1730, done/, the admin's ACL
+    sudo fleet apply lists fleet.toml      # /etc/fleet/lists.sh: bots, round_bots, review_bots, paused_bots
+    sudo fleet apply conf fleet.toml       # /etc/fleet/bots/<account>.conf, one per bot
+
+`[machines.<m>] admin = "<login>"` names you: in the agents group and every bot's group, with
+rights on every inbox. What a machine needs beyond that (the bots' ssh keys, sudoers for `bot
+<name>`, deploy wrappers) is a short script of your own; haku's is twenty lines per item.
 
 A `.conf` is POSIX sh the round scripts source: `kind`, `project`, `repo`, `app`, `trusted`
 (who may set `ready`: you, the plan bot's App, `ready_also`), `test_cmd`, `allow`, the
@@ -141,8 +147,9 @@ then comes the dev bot.
 
 ## Step 5: the dev bot in rounds
 
-`bot-round`, root-owned in `/usr/local/bin`, runs as the bot from a systemd timer every 20
-minutes. A round, in this order:
+`bot-round` (the kit's; `sudo fleet apply rounds fleet.toml` installs it root-owned in
+`/usr/local/bin` with `bot-review`, `fleet-token` and the units, and enables the timers) runs
+as the bot from a systemd timer every 20 minutes. A round, in this order:
 
 1. **Clean up**: remove worktrees in `work/` whose pull request is merged or closed.
 2. **Fix round**, when an open pull request has red checks or the last review asks for
