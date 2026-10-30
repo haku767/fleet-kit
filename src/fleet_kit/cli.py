@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 
-from . import __version__, doctor, edit, labels, machine, model, render, ruleset
+from . import __version__, doctor, edit, labels, machine, model, render, rounds, ruleset
 from .github import GH, GHError
 
 DEFAULT_CONF_DIR = "/etc/fleet/bots"
@@ -75,13 +75,35 @@ def cmd_render(args):
     return 0
 
 
+def cmd_apply_rounds(args, doc):
+    """`fleet apply rounds`: the scripts, units, directories and timers of this machine's bots."""
+    machine_name = args.machine or os.uname().nodename
+    if machine_name not in (doc.get("machines") or {}):
+        print(f"fleet apply rounds: this host is `{machine_name}`, not a machine in the file; --machine names one", file=sys.stderr)
+        return 1
+    root = args.dir or "/"
+    if root == "/" and os.geteuid() != 0 and not args.dry_run:
+        print("fleet apply rounds: installing to /usr/local/bin and /etc/systemd/system needs root (sudo), or --dir <root> for a trial", file=sys.stderr)
+        return 1
+    actions = rounds.apply(doc, machine_name, root=root, dry_run=args.dry_run, start=args.start)
+    for what, path in actions:
+        if what != "kept" or args.verbose:
+            print(f"{'would be ' if args.dry_run else ''}{what}: {path}")
+    n = sum(1 for w, _ in actions if w != "kept")
+    print(f"fleet apply rounds: {n} change{'s' if n != 1 else ''}, {len(actions) - n} unchanged, on {machine_name}"
+          + (" (dry run)" if args.dry_run else ""))
+    return 1 if any(w == "missing" for w, _ in actions) else 0
+
+
 def cmd_apply(args):
-    if args.what not in ("conf", "lists"):
-        print(f"fleet apply: `fleet apply conf` and `fleet apply lists` so far ({NEXT})", file=sys.stderr)
+    if args.what not in ("conf", "lists", "rounds"):
+        print(f"fleet apply: `fleet apply conf`, `fleet apply lists` and `fleet apply rounds` so far ({NEXT})", file=sys.stderr)
         return 2
     doc = load_checked(args.file, "apply")
     if doc is None:
         return 1
+    if args.what == "rounds":
+        return cmd_apply_rounds(args, doc)
     default_dir = DEFAULT_CONF_DIR if args.what == "conf" else DEFAULT_LISTS_DIR
     directory = args.dir or default_dir
     if directory == default_dir and os.geteuid() != 0 and not args.dry_run:
@@ -345,11 +367,14 @@ def main(argv=None):
     r.add_argument("--bot", help="print this bot's .conf to stdout instead")
     r.set_defaults(func=cmd_render)
     a = sub.add_parser("apply", help="put the rendered files on this machine (sudo): `apply conf` writes /etc/fleet/bots, "
-                                     "`apply lists` /etc/fleet/lists.sh and courier.sh")
-    a.add_argument("what", metavar="conf|lists")
+                                     "`apply lists` /etc/fleet/lists.sh and courier.sh, `apply rounds` installs bot-round, "
+                                     "bot-review, fleet-token and their units and enables the bots' timers")
+    a.add_argument("what", metavar="conf|lists|rounds")
     a.add_argument("file", nargs="?", default="fleet.toml")
-    a.add_argument("--dir", help=f"directory to write into (default {DEFAULT_CONF_DIR} for conf, {DEFAULT_LISTS_DIR} for lists)")
-    a.add_argument("--machine", help="for lists: the machine from the file (default: this host's name)")
+    a.add_argument("--dir", help=f"directory to write into (default {DEFAULT_CONF_DIR} for conf, {DEFAULT_LISTS_DIR} for lists; "
+                                 "for rounds a root to prefix /usr/local/bin and /etc with, a trial)")
+    a.add_argument("--machine", help="for lists and rounds: the machine from the file (default: this host's name)")
+    a.add_argument("--start", action="store_true", help="for rounds: start the enabled timers too (default: enable only)")
     a.add_argument("--dry-run", action="store_true", help="say what would change, write nothing")
     a.add_argument("-v", "--verbose", action="store_true", help="list the unchanged files too")
     a.set_defaults(func=cmd_apply)
