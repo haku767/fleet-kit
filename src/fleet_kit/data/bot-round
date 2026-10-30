@@ -33,7 +33,7 @@
 # No sudo, no deploy, nothing on haku's desktop; the house rules apply on top.
 set -eu
 # the first PATH: under systemd on NixOS the unit has none with id, getent or git in it
-# (bot-round@wingshell-dev exited 127 on the first day); the full one is set below
+# (a dev bot's first round exited 127 on that); the full one is set below
 export PATH="/usr/local/bin:/usr/bin${PATH:+:$PATH}"
 me=$(id -un)
 name=$me   # the bot's name in the fleet register (Agent: trailer, signatures, status file, inbox); set below where the account's differs
@@ -138,13 +138,13 @@ cd "$dir"
 git remote set-url origin "https://github.com/$repo.git"
 # no GitHub, no round (a laptop loses its uplink now and then); the timer comes back
 git fetch -q origin || { say "git fetch failed (network?), nothing done this round"; outcome=offline; exit 0; }
-# the default branch, where branches start and pull requests go: main for wingshell, master for
-# lora-studio (the first studio round died on origin/main, 2026-10-14); origin/HEAD knows it
+# the default branch, where branches start and pull requests go: main or master, by repository
+# (a first round died on origin/main where it is master, 2026-10-14); origin/HEAD knows it
 git remote set-head origin -a >/dev/null 2>&1 || true
 main=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##'); main=${main:-main}
 
 # worktree_checks: in the current worktree. Cargo's output is shared ($CARGO_TARGET_DIR) while
-# the repository's scripts look in target/ (check.sh runs ui-smoke on target/debug/wingshell):
+# the repository's scripts look in target/ (a check script may run a binary from target/debug/):
 # a link, kept out of git by the clone's info/exclude, which every worktree reads. With a
 # flake.nix the checks the prompt names run inside the dev shell (PLANS 8 step 4).
 worktree_checks() {
@@ -173,7 +173,7 @@ run_claude() {
          else empty end' > "$base.live" 2>/dev/null || true
   # the run's own result only: a subagent's result event carries parent_tool_use_id, and with
   # several result lines in .json the cost sum died in arithmetic and the round with it, after
-  # the push and before the pull request (wingshell #76, #81, #84, 2026-10-16; wingshell-plan)
+  # the push and before the pull request (three pull requests on 2026-10-16; found by the plan bot)
   jq -c 'select(.type=="result" and (.parent_tool_use_id // null) == null)' "$base.stream" 2>/dev/null | tail -n 1 > "$base.json" || true
   rc=$(jq -r 'if .is_error then 1 else 0 end' "$base.json" 2>/dev/null); [ -n "$rc" ] || rc="none (timeout or crash)"
   say "#$n: claude exit $rc, cost $(jq -r '.total_cost_usd // "?"' "$base.json" 2>/dev/null) USD, turns $(jq -r '.num_turns // "?"' "$base.json" 2>/dev/null)"
@@ -227,7 +227,7 @@ while read -r pr branch n; do
   [ -n "$n" ] && [ ! -f "$work/$n.state" ] || continue
   say "#$n: pull request $pr on $branch has no state here, adopting it"
   # a session (haku's `bot <name>`) may have the branch checked out in the clone itself: git
-  # refuses a second checkout and the round died on it, 2026-10-16 (wingshell #36, PR 72, three
+  # refuses a second checkout and the round died on it, 2026-10-16 (one issue, three
   # rounds). Not ours to touch: leave it, say so, the session checks out the default branch
   at=$(git worktree list --porcelain | awk -v b="refs/heads/$branch" '$1=="worktree"{w=$2} $1=="branch"&&$2==b{print w}')
   if [ -n "$at" ] && [ "$at" != "$work/$n" ]; then
@@ -263,7 +263,7 @@ for s in "$work"/*.state; do [ -f "$s" ] || continue
     # the check runs of the head commit over REST (needs only Checks: read; gh's own rollup query
     # also wants Actions: read for the workflow run and failed on 2026-10-08). A run still going
     # is PENDING even when one job failed already: the fix round wants the whole log, and the
-    # reviewer looked at a half-finished run on 2026-10-12 (wingshell #45)
+    # reviewer looked at a half-finished run on 2026-10-12
     checks=$(gh api "repos/$repo/commits/$head/check-runs?per_page=100" --jq '
       [.check_runs[] | (.conclusion // .status // "") | ascii_upcase] |
       if any(. == "" or . == "PENDING" or . == "IN_PROGRESS" or . == "QUEUED" or . == "WAITING" or . == "REQUESTED") then "PENDING"
@@ -271,7 +271,7 @@ for s in "$work"/*.state; do [ -f "$s" ] || continue
       else "OK" end' 2>>"$logfile" || echo UNKNOWN)
     # the latest review asking for changes, by id, and only when it is about this head: a fix
     # round answers each such review once (before 2026-10-11 the head alone was the key, and a
-    # new review on the fix round's own commit was skipped forever; wingshell #49, #45). A
+    # new review on the fix round's own commit was skipped forever, 2026-10-11). A
     # review on an older head was answered by the push that made the head: the reviewer's turn
     # (fix round 2 on PR 86 answered a review of the previous head with nothing, 2026-10-16)
     review= review_old=
@@ -291,7 +291,7 @@ for s in "$work"/*.state; do [ -f "$s" ] || continue
     # busy, for the slot count below: a pull request that still needs a dev round, or whose
     # checks are running. One waiting for a review or for haku's merge holds no slot (haku,
     # 2026-10-13; until 2026-10-18 every open pull request but an approved one counted, and
-    # three waiting ones blocked #91-#93 for a day; wingshell-plan)
+    # three waiting ones blocked three issues for a day; the plan bot)
     if [ -n "$why" ] || [ "$checks" = PENDING ]; then state_set $n busy yes; else state_set $n busy no; fi
     [ -n "$why" ] && [ -z "$fixn" ] || continue
     # marked for haku after a fix round that pushed nothing or after 3 of them: the mark holds
@@ -357,7 +357,7 @@ for s in "$work"/*.state; do [ -f "$s" ] || continue
   attempts=$(state_get $n attempts); attempts=${attempts:-0}
   if [ "$attempts" -ge 2 ]; then
     # two attempts, no pull request, never marked: a round died before mark_for_haku (it could,
-    # before 2026-10-11, when gh failed there under set -e; wingshell #41, #42, #44 after the
+    # before 2026-10-11, when gh failed there under set -e; three issues after the
     # NixOS reinstall). Mark it now, so haku sees it and nothing counts it as a retry.
     say "#$n: $attempts attempts, no pull request, not marked; marking for the owner now"
     state_set $n aborted stuck

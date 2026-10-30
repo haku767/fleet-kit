@@ -118,7 +118,7 @@ if [ ! -d "$src/.git" ]; then
   git clone -q "https://github.com/$repo.git" "$src" || { say "clone failed (network?), nothing done"; outcome=offline; exit 0; }
 fi
 git -C "$src" fetch -q origin || { say "git fetch failed (network?), nothing done this round"; outcome=offline; exit 0; }
-# the default branch (main for wingshell, master for lora-studio), as in bot-round
+# the default branch (main or master, by repository), as in bot-round
 git -C "$src" remote set-head origin -a >/dev/null 2>&1 || true
 main=$(git -C "$src" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##'); main=${main:-main}
 git -C "$src" worktree prune
@@ -137,7 +137,7 @@ run_claude() {
          else empty end' > "$base.live" 2>/dev/null || true
   # the run's own result only: a subagent's result event carries parent_tool_use_id, and with
   # several result lines in .json the cost sum died in arithmetic and the round with it, after
-  # the push and before the pull request (wingshell #76, #81, #84, 2026-10-16; wingshell-plan)
+  # the push and before the pull request (three pull requests on 2026-10-16; found by the plan bot)
   jq -c 'select(.type=="result" and (.parent_tool_use_id // null) == null)' "$base.stream" 2>/dev/null | tail -n 1 > "$base.json" || true
   rc=$(jq -r 'if .is_error then 1 else 0 end' "$base.json" 2>/dev/null); [ -n "$rc" ] || rc="none (timeout or crash)"
   say "PR $pr: claude exit $rc, cost $(jq -r '.total_cost_usd // "?"' "$base.json" 2>/dev/null) USD, turns $(jq -r '.num_turns // "?"' "$base.json" 2>/dev/null)"
@@ -158,7 +158,7 @@ checks_of() {
 # COMMENT review: a check run completed, or someone other than this bot commented. A COMMENT
 # is "I cannot judge yet" (checks unknown, a run haku has to start, a question), so the head
 # gets another look then; APPROVE and REQUEST_CHANGES are final for a head.
-# (`gh api --jq` takes one expression and no --arg, so jq runs after it; wingshell-plan found
+# (`gh api --jq` takes one expression and no --arg, so jq runs after it; a plan bot found
 # the round failing with "accepts 1 arg(s), received 4" on 2026-10-12)
 news_since() {
   gh api "repos/$repo/commits/$2/check-runs?per_page=100" 2>>"$logfile" |
@@ -178,7 +178,7 @@ while read -r pr head issue; do
   [ -n "$pr" ] || continue
   # marked for haku after 3 reviews without an approval: the mark holds for that head only. A
   # new head is the dev bot's answer (or haku's) and gets its reviews anew, label off (until
-  # 2026-10-20 the mark was for ever: wingshell PR 94 stood green and unreviewed after the fix
+  # 2026-10-20 the mark was for ever: a pull request stood green and unreviewed after the fix
   # push that answered review 3; the same rule as bot-round's since dotfiles #100)
   if [ -n "$(state_get $pr aborted)" ]; then
     [ "$(state_get $pr aborted)" = reviews ] && [ "$(state_get $pr head)" != "$head" ] || continue
@@ -190,7 +190,7 @@ while read -r pr head issue; do
   [ "$k" -lt "$max" ] || continue
   # a review by hand from the plan bot's own session on this head wins: the latest review of
   # this App on GitHub that is not a round's (the rounds sign "(bot-review, review k of n on …)";
-  # before 2026-10-13 the round's own COMMENT counted here and froze the head, wingshell-plan)
+  # before 2026-10-13 the round's own COMMENT counted here and froze the head, a plan bot)
   hand=$(gh api "repos/$repo/pulls/$pr/reviews" --paginate --slurp 2>>"$logfile" |
          jq -r --arg u "$reviewer" 'add | [.[] | select(.user.login == $u and ((.body // "") | test("\\(bot-review, review [0-9]+ of [0-9]+ on ") | not))] | last | .commit_id // empty' 2>/dev/null || true)
   if [ "$hand" = "$head" ]; then say "PR $pr: a review by hand sits on this head"; state_set $pr head "$head"; state_set $pr verdict session; continue; fi
@@ -225,7 +225,7 @@ base=$log/review-$pr-$k
 prompt="You are $name, the plan bot of $repo, reviewing pull request #$pr (head $head) for issue #$issue, headless, in a read-only checkout of the pull request's head at $rev/$pr. Read the issue with its acceptance criteria and comments (gh issue view $issue --comments), the pull request (gh pr view $pr --comments), its earlier reviews and review comments (bot-review get repos/$repo/pulls/$pr/reviews, bot-review get repos/$repo/pulls/$pr/comments), the diff (gh pr diff $pr; git diff origin/$main...HEAD; the files here) and the checks (the round saw: $checks; gh pr checks $pr, gh run view <run id> --log-failed for a failed one).${ci_note}${review_note:+ $review_note} Judge against the acceptance criteria, what the earlier reviews asked, and whether the docs that belong to the code (architecture, config reference, user docs the issue names) moved with it. Write the review to review.md in this directory with the Write tool: the first line exactly 'VERDICT: APPROVE', 'VERDICT: REQUEST_CHANGES' or 'VERDICT: COMMENT', then the review in English, short and concrete, each point with file and line: one sentence on what is good, then what must change as a list. REQUEST_CHANGES only for what the criteria, the earlier reviews or the checks require and the dev bot can do in its branch; COMMENT when you cannot judge (criteria unclear, checks unknown) or when the next step is $owner's and not the dev bot's (a re-run of a job, a workflow_dispatch run, a merge despite a red $main, a decision), and say exactly what $owner must do; APPROVE when every criterion is met and the checks are green. A REQUEST_CHANGES is final for this head: the dev bot gets a fix round for it and the round does not look at the head again, so never ask the dev bot for what it cannot do (it has no Actions permission: it cannot re-run jobs). Do not build or run anything, do not change files except review.md, do not write to GitHub (no comments, labels, reviews): the round posts review.md as your review. $harness"
 run_claude "$base" "$model" "$prompt"
 # not signed in ("Failed to authenticate", stale credentials as after the 2026-10-10 reinstall):
-# no review counted, haku signs in with `bot wingshell-plan` and /login, told once a day
+# no review counted, the owner signs in with `bot <account>` and /login, told once a day
 if jq -r '.result // ""' "$base.json" 2>/dev/null | grep -q 'Failed to authenticate\|Not logged in'; then
   say "claude is not signed in (Failed to authenticate / Not logged in); nothing counts, $owner signs in: bot ${me}, then /login"
   signed_in=false outcome=not-signed-in
