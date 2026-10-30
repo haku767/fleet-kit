@@ -29,7 +29,7 @@ KEYS = {
     "defaults.round": {"every", "max_worktrees", "max_turns", "budget_usd", "model_small", "model_large"},
     "defaults.review": {"every", "max_per_pr", "max_turns", "budget_usd", "model_small", "model_large"},
     "defaults.page": {"budget_dev_usd", "budget_plan_usd", "collect_every"},
-    "machine": {"role", "family", "home_root", "scratch_root", "page", "guard", "courier"},
+    "machine": {"role", "family", "home_root", "scratch_root", "page", "guard", "courier", "admin"},
     "stack": {"test", "allow", "env", "note"},
     "project": {"repo", "stacks", "test", "test_extra", "test_note", "ci", "ci_note", "ci_checks", "review_note",
                 "allow_extra", "env", "runner", "reads", "deploy", "paused", "owner_app", "ready_also", "plan", "dev", "machine",
