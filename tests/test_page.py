@@ -112,7 +112,7 @@ class PageTests(unittest.TestCase):
         for line in ("User=box-guard", "Environment=HOME=/srv/box-guard", "ReadWritePaths=/srv/agents/fleet -/srv/box-guard/.cache",
                      "ExecStart=/usr/local/bin/fleet collect /etc/fleet/fleet.toml", "nvidia-smi"):
             self.assertIn(line, service)
-        self.assertNotIn("PrivateDevices", service)
+        self.assertNotIn("PrivateDevices=yes", service)   # the comment names it, the line is not there
         self.assertNotIn("{", service)
         timer = (self.root / "etc/systemd/system/fleet-collect.timer").read_text()
         self.assertIn("OnUnitActiveSec=5m", timer)
