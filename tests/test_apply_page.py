@@ -164,6 +164,26 @@ class PageTests(unittest.TestCase):
         self.assertEqual(self.apply(load(), assets=self.root / "nowhere")[-1][0] != "missing", True)   # reported, the rest goes on
         self.assertTrue(any(w == "missing" and "not a directory" in x for w, x in self.apply(load(), assets=self.root / "nowhere")))
 
+    def test_every_directory_is_set_not_inherited(self):
+        """A sets/ or sprites/ directory that came up group-writable (a default ACL on the parent)
+        is put to 755 root; the files inside are left as they are."""
+        self.kit()
+        self.fleet_dir.mkdir(parents=True)
+        (self.fleet_dir / "sets").mkdir()
+        (self.fleet_dir / "sets").chmod(0o2775)
+        assets = self.root / "myassets"
+        (assets / "sprites").mkdir(parents=True)
+        (assets / "sprites/a.png").write_bytes(b"\x89PNG")
+        (self.fleet_dir / "assets/sprites").mkdir(parents=True)
+        (self.fleet_dir / "assets/sprites").chmod(0o2775)
+        acts = self.apply(load(), assets=assets)
+        self.assertIn(("changed", "/srv/agents/fleet/sets"), acts)
+        self.assertIn(("changed", "/srv/agents/fleet/assets/sprites"), acts)
+        for d in ("sets", "assets", "assets/sprites"):
+            self.assertEqual((self.fleet_dir / d).stat().st_mode & 0o7777, 0o755, d)
+        acts = self.apply(load(), assets=assets)
+        self.assertEqual({w for w, x in acts if x.startswith("/srv/agents/fleet/")}, {"kept"})
+
     def test_quest_json_goes_once_taken_over(self):
         self.kit()
         self.fleet_dir.mkdir(parents=True)
