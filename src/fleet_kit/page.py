@@ -156,6 +156,21 @@ def unit_text(name, guard, home, agents_dir, every, gpu):
             .replace("{every}", every).replace("{gpu}", gpu_lines))
 
 
+def copy_tree(t, src, dst):
+    """src's files under dst, root-owned 644, every directory of src under dst 755 root, set
+    explicitly: a directory the page's parent passes a default ACL to (an agents directory
+    usually has one, so dropped notes stay readable) would otherwise come up group-writable
+    and let any agent of the group swap a script the owner's browser loads."""
+    out = []
+    for p in sorted(Path(src).rglob("*")):
+        rel = p.relative_to(src)
+        if p.is_dir():
+            out.append((t.ensure_dir(f"{dst}/{rel}", 0o755, "root", "root"), f"{dst}/{rel}"))
+        elif p.is_file():
+            out.append((t.install_bytes(f"{dst}/{rel}", p.read_bytes(), 0o644), f"{dst}/{rel}"))
+    return out
+
+
 def mirror(t, src, dst):
     """src's files under dst, root-owned 644; a file under dst that src does not have goes."""
     out = []
@@ -163,6 +178,9 @@ def mirror(t, src, dst):
     if not src.is_dir():
         return [("missing", f"--assets {src}: not a directory")]
     out.append((t.ensure_dir(dst, 0o755, "root", "root"), dst))
+    for p in sorted(src.rglob("*")):   # every directory set explicitly: see copy_tree
+        if p.is_dir() and "__pycache__" not in p.parts:
+            out.append((t.ensure_dir(f"{dst}/{p.relative_to(src)}", 0o755, "root", "root"), f"{dst}/{p.relative_to(src)}"))
     wanted = {str(p.relative_to(src)): p for p in sorted(src.rglob("*")) if p.is_file() and "__pycache__" not in p.parts}
     for rel, p in wanted.items():
         out.append((t.install_bytes(f"{dst}/{rel}", p.read_bytes(), 0o644), f"{dst}/{rel}"))
@@ -203,10 +221,7 @@ def apply_page(doc, machine, fleet_text, root="/", dry_run=False, systemctl=None
         out.append((t.ensure_dir(d, 0o2755, guard, group), d))
     pd = Path(page_data) if page_data else package_dir() / "data" / "page"
     if pd.is_dir():
-        for p in sorted(pd.rglob("*")):
-            if p.is_file():
-                rel = p.relative_to(pd)
-                out.append((t.install_bytes(f"{fleet_dir}/{rel}", p.read_bytes(), 0o644), f"{fleet_dir}/{rel}"))
+        out += copy_tree(t, pd, fleet_dir)
     else:
         out.append(("skipped", "the kit has no page files yet (data/page): the collector runs, the page comes with the kit's next version"))
     if assets:
