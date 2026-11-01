@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 
-from . import __version__, accounts, doctor, edit, labels, machine, model, render, rounds, ruleset
+from . import __version__, accounts, collect, doctor, edit, labels, machine, model, render, rounds, ruleset
 from .github import GH, GHError
 
 DEFAULT_CONF_DIR = "/etc/fleet/bots"
@@ -372,6 +372,24 @@ def cmd_doctor(args):
     return 1 if n["fail"] else 0
 
 
+def cmd_collect(args):
+    doc = load_checked(args.file, "collect")
+    if doc is None:
+        return 1
+    try:
+        cfg = collect.config(doc, machine=args.machine, out=args.out, fleet_token=args.fleet_token)
+    except ValueError as e:
+        print(f"fleet collect: {e}", file=sys.stderr)
+        return 1
+    if args.gh:
+        cfg.gh = args.gh
+    try:
+        return collect.main(cfg)
+    except OSError as e:
+        print(f"fleet collect: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_later(args):
     print(f"fleet {args.command}: {NEXT}", file=sys.stderr)
     return 2
@@ -443,6 +461,14 @@ def main(argv=None):
     d.add_argument("--root", default="/", help=argparse.SUPPRESS)   # the tests' temporary root
     d.add_argument("-v", "--verbose", action="store_true", help="list the checks that are ok too")
     d.set_defaults(func=cmd_doctor)
+    co = sub.add_parser("collect", help="the page's JSON: GitHub, the rounds' status files, timers, reports, the machine, "
+                                        "the history, what waits on the owner, and each set's own block (as the bots machine's guard)")
+    co.add_argument("file", nargs="?", default="fleet.toml")
+    co.add_argument("--out", help="the JSON to write (default <agents_dir>/fleet/fleet.json; the page's directory is its parent)")
+    co.add_argument("--machine", help="the machine from the file this is (default: this host's name)")
+    co.add_argument("--fleet-token", help=f"the token helper (default {collect.FLEET_TOKEN})")
+    co.add_argument("--gh", help=argparse.SUPPRESS)   # a fake under test
+    co.set_defaults(func=cmd_collect)
     for name, help_ in (("status", "the page's lists in the terminal"), ("page", "install collector and page")):
         p = sub.add_parser(name, help=f"{help_} ({NEXT.split(':')[0]})")
         p.add_argument("rest", nargs="*")

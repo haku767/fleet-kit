@@ -16,6 +16,10 @@ REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$")
 LOGIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 ACCOUNT = re.compile(r"^[a-z_][a-z0-9_-]*$")
 COLOR = re.compile(r"^[0-9a-fA-F]{6}$")
+SET_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
+EVERY = re.compile(r"^\d+(ms|s|m|h|d|w)?$")
+SETS = ("default", "minimal", "fantasy")   # the kit's sets (fleet_kit.sets.BUILTIN)
+
 
 # What a secret looks like when it ends up in the file by mistake: GitHub tokens of every kind,
 # an Anthropic key, a PEM block, a long hex or base64 run. Facts only, never a key.
@@ -28,8 +32,9 @@ KEYS = {
     "fleet": {"name", "owner", "agents_dir", "trailers", "rules"},
     "defaults.round": {"every", "max_worktrees", "max_turns", "budget_usd", "model_small", "model_large"},
     "defaults.review": {"every", "max_per_pr", "max_turns", "budget_usd", "model_small", "model_large"},
-    "defaults.page": {"budget_dev_usd", "budget_plan_usd", "collect_every"},
-    "machine": {"role", "family", "home_root", "scratch_root", "page", "guard", "courier", "admin"},
+    "page": {"set", "sets", "collect_every", "labels"},   # plus one table per set, [page.<set>], its knobs
+    "page.labels": {"ready", "next", "decide", "live"},
+    "machine": {"role", "family", "home_root", "scratch_root", "page", "guard", "courier", "admin", "disks", "gpu"},
     "stack": {"test", "allow", "env", "note"},
     "project": {"repo", "stacks", "test", "test_extra", "test_note", "ci", "ci_note", "ci_checks", "review_note",
                 "allow_extra", "env", "runner", "reads", "deploy", "paused", "owner_app", "ready_also", "plan", "dev", "machine",
@@ -141,10 +146,43 @@ def check(text, doc):
             elif len(spec.get("description", "")) > 100:
                 err(w, "description longer than GitHub's 100 characters")
 
-    for d, allowed in (("round", KEYS["defaults.round"]), ("review", KEYS["defaults.review"]), ("page", KEYS["defaults.page"])):
+    for d, allowed in (("round", KEYS["defaults.round"]), ("review", KEYS["defaults.review"])):
         t = (doc.get("defaults") or {}).get(d)
         if isinstance(t, dict):
             keys(f"defaults.{d}", t, allowed)
+    if isinstance((doc.get("defaults") or {}).get("page"), dict):
+        warn("defaults.page", "moved to [page] (collect_every) and [page.fantasy] (the budgets); ignored")
+
+    page = doc.get("page")
+    if page is not None and not isinstance(page, dict):
+        err("page", "must be a table")
+        page = None
+    if page:
+        keys("page", {k: v for k, v in page.items() if not isinstance(v, dict) or k == "labels"}, KEYS["page"])
+        sets = page.get("sets")
+        if sets is not None and not (isinstance(sets, list) and sets and all(isinstance(x, str) and SET_NAME.match(x) for x in sets)):
+            err("page.sets", "must be a list of set names (letters, digits, - and _)")
+            sets = None
+        chosen = page.get("set")
+        if chosen is not None and not (isinstance(chosen, str) and SET_NAME.match(chosen)):
+            err("page.set", "must be a set name (letters, digits, - and _)")
+        elif chosen and sets and chosen not in sets:
+            err("page.set", f"`{chosen}` is not in page.sets")
+        if "collect_every" in page and not (isinstance(page["collect_every"], str) and EVERY.match(page["collect_every"])):
+            err("page.collect_every", "a systemd span like 5m or 1h")
+        lab = page.get("labels")
+        if lab is not None:
+            if not isinstance(lab, dict):
+                err("page.labels", "must be a table: role = label name")
+            else:
+                keys("page.labels", lab, KEYS["page.labels"])
+                for k, v in lab.items():
+                    if not isinstance(v, str) or not v:
+                        err(f"page.labels.{k}", "a label name")
+        known = set(sets or []) | set(SETS)
+        for k, v in page.items():
+            if isinstance(v, dict) and k != "labels" and k not in known:
+                warn(f"page.{k}", "knobs for a set that is neither the kit's nor in page.sets")
 
     machines = tables("machines")
     if not machines:
@@ -153,6 +191,10 @@ def check(text, doc):
     for mname, m in machines.items():
         w = f"machines.{mname}"
         keys(w, m, KEYS["machine"])
+        if "disks" in m and not (isinstance(m["disks"], list) and all(isinstance(x, str) and x.startswith("/") for x in m["disks"])):
+            err(f"{w}.disks", "a list of absolute paths")
+        if "gpu" in m and not (isinstance(m["gpu"], bool) or (isinstance(m["gpu"], dict) and set(m["gpu"]) <= {"lock"})):
+            err(f"{w}.gpu", "true, false, or { lock = \"/path\" }")
         if m.get("role") not in ROLES:
             err(w, f"role must be one of {', '.join(ROLES)}")
         elif m["role"] == "bots":
