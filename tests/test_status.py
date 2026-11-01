@@ -117,9 +117,11 @@ class StatusTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             try:
                 os.chdir(tmp)
-                self.assertEqual(cli.default_file(), "fleet.toml")   # nothing anywhere: the error names fleet.toml
+                # the installed file's name points into the temporary directory first: on a machine
+                # that has /etc/fleet/fleet.toml the first assertion would otherwise see it
                 saved, cli.INSTALLED_FILE = cli.INSTALLED_FILE, str(pathlib.Path(tmp, "etc.toml"))
                 try:
+                    self.assertEqual(cli.default_file(), "fleet.toml")   # nothing anywhere: the error names fleet.toml
                     pathlib.Path(tmp, "etc.toml").write_text(MINIMAL.read_text())
                     self.assertEqual(cli.default_file(), cli.INSTALLED_FILE)
                     self.assertEqual(cli.main(["check"]), 0)   # the installed file
