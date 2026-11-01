@@ -42,10 +42,10 @@ Three principles hold it together:
 | a daily check of GitHub and the machine against the file | `fleet doctor` |
 | the bots' Unix accounts, homes, scratch directories, the inboxes with their ACLs | `fleet apply accounts`, `fleet apply inbox` (arch family, root; NixOS declares them in its module) |
 | the round scripts `bot-round`, `bot-review`, the token helper `fleet-token`, the units and timers | `fleet apply rounds` installs the kit's own (`src/fleet_kit/data`, MIT, from haku's fleet) root-owned and enables the timers |
-| the page (collector and HTML) | haku's fleet repository (`dashboard/`), not in the kit yet |
+| the page: the collector, the frame and its looks, the unit and timer | `fleet collect` writes the JSON, `fleet apply page` installs page and timer (step 7), `fleet status` prints the lists in a shell |
 
-So since 2026-10-30 the kit carries the register, the GitHub side and the machine side of a
-fleet; what stays outside is a machine's own (ssh keys, sudoers, deploy wrappers) and the page.
+So the kit carries the register, the GitHub side, the machine side and the page of a fleet;
+what stays outside is a machine's own (ssh keys, sudoers, deploy wrappers).
 
 ## Prerequisites
 
@@ -187,6 +187,51 @@ with green checks. At most three review rounds per pull request, then `needs-hak
 
 You merge what is approved. That is all of your part, and that is why the setup pays.
 
+## Step 7: the page
+
+One JSON, one static page, served on your tailnet or your LAN: what waits on you (pull requests
+to merge, questions to decide, places to step in), every project with its pipeline and bots,
+every bot's rounds and cost, the machine and the guards. The look of the overview is a *set*:
+`default` is the plain desk, `minimal` the three lists only (a phone, a panel), `fantasy` the
+fleet as a game with a daily quest, mana, figures, levels and badges; [`docs/sets.md`](sets.md)
+shows how to write one of your own. In `fleet.toml`:
+
+    [page]
+    set = "default"                   # what the page opens with; viewers can switch
+    collect_every = "5m"
+    [machines.box]
+    page = { serve = "tailscale", path = "/fleet" }   # or caddy, nginx, none
+    disks = ["/", "/data"]            # what the machine card shows
+    gpu = false                       # true, or { lock = "/path" }, when nvidia-smi should be asked
+
+Then, as root on the bots machine:
+
+    fleet apply kit                   # this kit as a root-owned copy with /usr/local/bin/fleet
+    fleet apply page fleet.toml --assets dashboard/assets --start
+
+`apply page` installs the file as `/etc/fleet/fleet.toml`, the page under `<agents_dir>/fleet/`
+(the guard's directory, where the JSON goes), your `--assets` next to it (optional:
+`identities.json` with a name and a line per bot, `sprites/<bot>.png`, `sets/` of your own), and
+`fleet-collect.service` and `.timer`, which run `fleet collect` as the guard every
+`collect_every`, sandboxed; `--start` runs it once. It ends with the lines that put the directory
+on the web for your `serve` (printed, not run: `tailscale serve` is yours). Everything under that
+directory is served, the state files too; nothing there is secret, the JSON holds what GitHub
+and the status files say.
+
+Every command takes `/etc/fleet/fleet.toml` when it is given no file and the working directory
+has none, so `fleet status` and `fleet doctor` work from anywhere on the machine after that.
+`fleet collect` reads GitHub through the guard's App: install it read-only (Issues, Pull
+requests, Checks) on every project repository; a project it cannot read shows an error instead
+of data and an item to step in.
+
+A shell instead of a browser:
+
+    fleet status                      # the three lists, one line per project and bot, the machine
+    fleet status myapp                # one project
+
+Exit 2 says the JSON is older than 20 minutes: the timer is off or the collector fails;
+`journalctl -u fleet-collect -n 20` says why.
+
 ## Every day
 
     fleet doctor all fleet.toml -v
@@ -214,7 +259,7 @@ with `courier = { to = ..., every = ..., ssh = ... }`; `fleet render` then gives
 2. Week 2: the dev App and account, `bot-round` by hand, read the log, adjust prompt and
    allow list, only then the timer with N=1.
 3. Week 3: `bot-review` as the plan App, by hand, then the timer. From here you only merge.
-4. Then: house rules, the guard, the page; N to 2; a second project is an afternoon.
+4. Then: house rules, the guard, the page (step 7); N to 2; a second project is an afternoon.
 
 What tripped haku most often, so you do not repeat it: the fix round must hang on the
 review's id, not on the head, or it stalls after its own push. GitHub fills `reviewDecision`

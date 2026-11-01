@@ -4,11 +4,18 @@ import argparse
 import os
 import sys
 
-from . import __version__, accounts, collect, doctor, edit, labels, machine, model, render, rounds, ruleset
+from . import __version__, accounts, collect, doctor, edit, labels, machine, model, render, rounds, ruleset, status
 from .github import GH, GHError
 
 DEFAULT_CONF_DIR = "/etc/fleet/bots"
 DEFAULT_LISTS_DIR = "/etc/fleet"
+INSTALLED_FILE = "/etc/fleet/fleet.toml"   # what `fleet apply page` installs; every command's default after fleet.toml here
+
+
+def default_file():
+    """The file when the command names none: fleet.toml in the working directory (a clone),
+    else the installed one. A name that exists nowhere stays `fleet.toml`, so the error names it."""
+    return "fleet.toml" if os.path.exists("fleet.toml") or not os.path.exists(INSTALLED_FILE) else INSTALLED_FILE
 NEXT = "not yet: fleet PLANS 13, stage 3"
 
 
@@ -390,6 +397,22 @@ def cmd_collect(args):
         return 1
 
 
+def cmd_status(args):
+    if args.project and args.project.endswith(".toml") and args.file is None:   # `fleet status fleet.toml`
+        args.project, args.file = None, args.project
+    path = args.json_path
+    if not path:
+        doc = load_checked(args.file or default_file(), "status")
+        if doc is None:
+            return 1
+        agents = (doc.get("fleet") or {}).get("agents_dir")
+        if not agents:
+            home_root = next((m.get("home_root") for m in (doc.get("machines") or {}).values() if isinstance(m, dict)), "/srv")
+            agents = f"{home_root}/agents"
+        path = f"{agents}/fleet/fleet.json"
+    return status.main(path, args.project)
+
+
 def cmd_later(args):
     print(f"fleet {args.command}: {NEXT}", file=sys.stderr)
     return 2
@@ -400,10 +423,10 @@ def main(argv=None):
     ap.add_argument("--version", action="version", version=f"fleet-kit {__version__}")
     sub = ap.add_subparsers(dest="command", required=True)
     c = sub.add_parser("check", help="validate fleet.toml")
-    c.add_argument("file", nargs="?", default="fleet.toml")
+    c.add_argument("file", nargs="?", default=None)
     c.set_defaults(func=cmd_check)
     r = sub.add_parser("render", help="the derived files: one .conf per bot, the lists, the page's tables")
-    r.add_argument("file", nargs="?", default="fleet.toml")
+    r.add_argument("file", nargs="?", default=None)
     r.add_argument("--out", default="rendered", help="directory to write into (default rendered/)")
     r.add_argument("--bot", help="print this bot's .conf to stdout instead")
     r.set_defaults(func=cmd_render)
@@ -412,7 +435,7 @@ def main(argv=None):
                                      "homes and scratch directories, `apply inbox` the inboxes with their ACLs, `apply rounds` "
                                      "bot-round, bot-review, fleet-token, their units and the bots' timers")
     a.add_argument("what", metavar="conf|lists|accounts|inbox|rounds")
-    a.add_argument("file", nargs="?", default="fleet.toml")
+    a.add_argument("file", nargs="?", default=None)
     a.add_argument("--dir", help=f"directory to write into (default {DEFAULT_CONF_DIR} for conf, {DEFAULT_LISTS_DIR} for lists; "
                                  "for rounds a root to prefix /usr/local/bin and /etc with, a trial)")
     a.add_argument("--machine", help="for lists and rounds: the machine from the file (default: this host's name)")
@@ -424,7 +447,7 @@ def main(argv=None):
                             ("ruleset", "the rule on a project's default branch (gh api, the owner)", cmd_ruleset)):
         g = sub.add_parser(name, help=help_)
         g.add_argument("project", help="a project from the file, or `all` (every project with bots)")
-        g.add_argument("file", nargs="?", default="fleet.toml")
+        g.add_argument("file", nargs="?", default=None)
         g.add_argument("--apply", action="store_true", help="write to GitHub; without it the command only compares")
         g.add_argument("-v", "--verbose", action="store_true", help="list the repository's other labels too")
         g.set_defaults(func=fn)
@@ -441,7 +464,7 @@ def main(argv=None):
     ap_.add_argument("--no-dev", action="store_true", help="no dev bot")
     ap_.add_argument("--machine", help="the bots' machine when several have role bots")
     ap_.add_argument("--paused", action="store_true", help="start paused (no rounds)")
-    ap_.add_argument("file", nargs="?", default="fleet.toml")
+    ap_.add_argument("file", nargs="?", default=None)
     ap_.set_defaults(func=cmd_add_project)
     ab = sub.add_parser("add-bot", help="append a plan or dev bot to a project in the file; prints what GitHub and the machine need")
     ab.add_argument("project")
@@ -450,26 +473,32 @@ def main(argv=None):
     ab.add_argument("--account", help="the Unix account when it differs from the name")
     ab.add_argument("--persona", help="the page's persona")
     ab.add_argument("--machine", help="the bot's machine when several have role bots")
-    ab.add_argument("file", nargs="?", default="fleet.toml")
+    ab.add_argument("file", nargs="?", default=None)
     ab.set_defaults(func=cmd_add_bot)
     d = sub.add_parser("doctor", help="what is wrong, on GitHub for a project (repository, labels, ruleset, Apps, installations, "
                                       "who set ready, the runner) and on this machine (accounts, .conf files, scripts, "
                                       "timers, status files, inboxes)")
     d.add_argument("project", nargs="?", default="all", help="a project from the file, or `all` (default)")
-    d.add_argument("file", nargs="?", default="fleet.toml")
+    d.add_argument("file", nargs="?", default=None)
     d.add_argument("--machine", help="the machine to check (default: this host's name; a machine not in the file is skipped)")
     d.add_argument("--root", default="/", help=argparse.SUPPRESS)   # the tests' temporary root
     d.add_argument("-v", "--verbose", action="store_true", help="list the checks that are ok too")
     d.set_defaults(func=cmd_doctor)
     co = sub.add_parser("collect", help="the page's JSON: GitHub, the rounds' status files, timers, reports, the machine, "
                                         "the history, what waits on the owner, and each set's own block (as the bots machine's guard)")
-    co.add_argument("file", nargs="?", default="fleet.toml")
+    co.add_argument("file", nargs="?", default=None)
     co.add_argument("--out", help="the JSON to write (default <agents_dir>/fleet/fleet.json; the page's directory is its parent)")
     co.add_argument("--machine", help="the machine from the file this is (default: this host's name)")
     co.add_argument("--fleet-token", help=f"the token helper (default {collect.FLEET_TOKEN})")
     co.add_argument("--gh", help=argparse.SUPPRESS)   # a fake under test
     co.set_defaults(func=cmd_collect)
-    for name, help_ in (("status", "the page's lists in the terminal"), ("page", "install collector and page")):
+    st = sub.add_parser("status", help="the page's lists in the terminal, from the collector's JSON: merge, decide, step in, "
+                                       "one line per project and bot, the machine and the guards")
+    st.add_argument("project", nargs="?", help="a project's short name (the repository's), for its items and bots only")
+    st.add_argument("file", nargs="?", default=None)
+    st.add_argument("--json", dest="json_path", help="the JSON to read (default <agents_dir>/fleet/fleet.json from the file)")
+    st.set_defaults(func=cmd_status)
+    for name, help_ in (("page", "install collector and page"),):
         p = sub.add_parser(name, help=f"{help_} ({NEXT.split(':')[0]})")
         p.add_argument("rest", nargs="*")
         p.set_defaults(func=cmd_later)
@@ -484,4 +513,6 @@ def main(argv=None):
         i = argv.index(cmd)
         args = sub.choices[cmd].parse_intermixed_args(argv[:i] + argv[i + 1:])
         args.command = cmd
+    if getattr(args, "file", None) is None and "file" in vars(args):
+        args.file = default_file()
     return args.func(args)
