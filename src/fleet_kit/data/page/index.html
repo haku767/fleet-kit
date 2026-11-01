@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet</title>
+<style>
+  :root { --bg:#14161a; --fg:#d8dbe0; --dim:#8b919a; --line:#2a2e35; --card:#1b1e24; --hover:#20242b;
+          --green:#5fb57a; --red:#e06c75; --amber:#e5c07b; --blue:#61afef; --purple:#c678dd; --star:#e5c07b; }
+  * { box-sizing:border-box; }
+  body { margin:0 auto; padding:16px; background:var(--bg); color:var(--fg);
+         font:14px/1.45 system-ui, "Segoe UI", sans-serif; max-width:1320px;
+         display:grid; grid-template-columns:190px minmax(0, 1fr); gap:0 24px; align-items:start; }
+  main { min-width:0; }
+  h1 { font-size:18px; margin:0 0 4px; } h2 { font-size:15px; margin:18px 0 8px; color:var(--dim); font-weight:600; }
+  h1 small, h2 small { color:var(--dim); font-weight:normal; font-size:12px; margin-left:8px; }
+  #meta { color:var(--dim); font-size:12px; }
+  /* the side menu: overview, the projects with their bots, the machine; the current page marked */
+  aside { position:sticky; top:16px; font-size:13px; }
+  aside a { display:block; color:var(--fg); padding:3px 8px; border-radius:6px; }
+  aside a:hover { background:var(--hover); text-decoration:none; }
+  aside a.now { background:var(--card); box-shadow:inset 0 0 0 1px var(--line); font-weight:600; }
+  aside .sec { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; margin:14px 8px 3px; }
+  aside a.bl { font-size:12px; color:var(--dim); padding:1px 8px 1px 20px; display:flex; align-items:center; gap:6px; }
+  aside a.bl.now { color:var(--fg); }
+  .dot { width:7px; height:7px; border-radius:50%; background:var(--line); flex:none; display:inline-block; }
+  .dot.work { background:var(--blue); } .dot.done { background:var(--green); } .dot.bad { background:var(--red); }
+  .dot.sleep { background:var(--dim); opacity:.6; } .dot.off { background:var(--line); }
+  aside .cnt { float:right; font-size:11px; line-height:17px; padding:0 6px; border-radius:9px; background:var(--amber); color:#111; font-weight:600; }
+  aside .cnt.red { background:var(--red); }
+  .back { font-size:12px; display:inline-block; margin-bottom:2px; }
+  @media (max-width:720px) {
+    body { display:block; }
+    aside { position:static; display:flex; flex-wrap:wrap; gap:2px; margin-bottom:10px; }
+    aside .sec, aside a.bl { display:none; } aside .cnt { float:none; margin-left:4px; } }
+  a { color:var(--blue); text-decoration:none; } a:hover { text-decoration:underline; }
+  .grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; min-width:0; }
+  .card h3 { margin:0 0 6px; font-size:14px; display:flex; justify-content:space-between; gap:8px; align-items:center; }
+  .card h3 small { color:var(--dim); font-weight:normal; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { padding:3px 4px; vertical-align:top; border-top:1px solid var(--line); text-align:left; }
+  th { color:var(--dim); font-weight:600; border-top:none; font-size:12px; }
+  td.n { color:var(--dim); white-space:nowrap; width:1%; }
+  td.t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:0; }
+  .tag { display:inline-block; padding:0 6px; border-radius:10px; font-size:11px; line-height:17px; margin:1px 4px 1px 0; background:var(--line); color:var(--fg); white-space:nowrap; }
+  .green { background:var(--green); color:#111; } .red { background:var(--red); color:#111; }
+  .amber { background:var(--amber); color:#111; } .blue { background:var(--blue); color:#111; }
+  .err { color:var(--red); font-size:12px; } .dim { color:var(--dim); }
+  .todo li { margin:3px 0; } .todo { margin:0; padding-left:18px; }
+  .todo .p { color:var(--dim); font-size:12px; margin-left:4px; }
+  .stack { display:grid; gap:12px; } .hint { font-size:12px; margin:-2px 0 6px; }
+  pre { margin:4px 0 0; white-space:pre-wrap; font-size:12px; color:var(--fg); }
+  .foot { display:flex; flex-wrap:wrap; gap:6px 18px; font-size:13px; color:var(--dim); margin-top:14px; }
+  /* the looks: a line of links under every view, the current one marked */
+  .looks { margin-top:22px; padding-top:8px; border-top:1px solid var(--line); font-size:12px; color:var(--dim); }
+  .looks a { margin-right:10px; } .looks a.now { color:var(--fg); font-weight:600; }
+  .top { display:grid; gap:12px; grid-template-columns:3fr 2fr; margin-bottom:12px; }
+  @media (max-width:720px) { .top { grid-template-columns:1fr; } }
+  .big { font-size:24px; font-weight:700; line-height:1.2; } .big small { font-size:13px; font-weight:normal; color:var(--dim); margin-left:6px; }
+  .bar { height:10px; background:var(--line); border-radius:5px; overflow:hidden; margin:6px 0 4px; }
+  .bar i { display:block; height:100%; background:var(--green); border-radius:5px; transition:width .6s; }
+  .bar.thin { height:5px; margin:3px 0 0; }
+  .spark { display:inline-flex; align-items:flex-end; gap:1px; height:16px; vertical-align:middle; }
+  .spark i { width:4px; min-height:1px; background:var(--green); border-radius:1px; opacity:.9; }
+  .spark.c-blue i { background:var(--blue); } .spark.c-purple i { background:var(--purple); } .spark i.z { background:var(--line); }
+  .spark.big { height:44px; gap:2px; } .spark.big i { width:5px; }
+  .hist td { font-size:12px; } .hist .dim { font-size:11px; white-space:nowrap; }
+  /* a project card: the pipeline bar, the bots */
+  .proj h3 a { color:var(--fg); } .proj h3 .chips { font-weight:normal; display:flex; align-items:center; gap:2px; flex-wrap:wrap; justify-content:flex-end; }
+  .pipe { margin:6px 0 8px; }
+  .segs { display:flex; gap:3px; } .segs i { flex:1; height:10px; background:var(--line); border-radius:3px; }
+  .segs i.on { background:var(--green); } .segs i.you { animation:pulse 1.6s ease-in-out infinite; }
+  .stages { display:flex; gap:3px; margin-top:3px; } .stages span { flex:1; text-align:center; font-size:11px; color:var(--dim); }
+  .stages span b { color:var(--fg); font-weight:600; margin-right:3px; } .stages span.now { color:var(--fg); }
+  @keyframes pulse { 0%,100% { box-shadow:0 0 0 0 rgba(95,181,122,0); } 50% { box-shadow:0 0 0 4px rgba(95,181,122,.35); } }
+  .bots { display:flex; flex-wrap:wrap; gap:4px 16px; }
+  .bot { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dim); min-width:0; flex:1; max-width:200px; }
+  .bot .lbl { min-width:0; flex:1; } .bot .lbl b { color:var(--fg); font-weight:600; display:block; }
+  .bot .lbl b a { color:var(--fg); } .bot .lbl .w { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
+  .botline { font-size:12px; color:var(--dim); display:flex; align-items:center; gap:6px; margin:2px 0; } .botline a { color:var(--fg); font-weight:600; }
+  .fig { position:relative; width:36px; height:36px; flex:none; color:var(--dim); }
+  .fig svg, .fig img { width:36px; height:36px; display:block; } .fig img { object-fit:contain; }
+  .fig.large { width:128px; height:128px; } .fig.large svg, .fig.large img { width:128px; height:128px; }
+  .fig .zz { position:absolute; right:-2px; top:-4px; font-size:11px; color:var(--dim); animation:zz 2.4s ease-in-out infinite; }
+  .fig .zz2 { right:-9px; top:-10px; font-size:9px; animation-delay:.8s; }
+  .fig.large .zz { font-size:28px; right:2px; top:6px; } .fig.large .zz2 { font-size:20px; right:-12px; top:-6px; }
+  .work .fig { color:var(--blue); animation:bob .7s ease-in-out infinite; }
+  .done .fig { color:var(--green); }
+  .bad .fig { color:var(--red); animation:shake .4s linear infinite; } .bad .fig img { outline:2px solid var(--red); outline-offset:-2px; border-radius:50%; }
+  .off .fig { opacity:.35; } .sleep .fig img { filter:grayscale(.5); }
+  @keyframes bob { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-3px); } }
+  @keyframes shake { 0%,100% { transform:translateX(0); } 25% { transform:translateX(-2px); } 75% { transform:translateX(2px); } }
+  @keyframes zz { 0% { opacity:0; transform:translateY(2px); } 30% { opacity:1; } 100% { opacity:0; transform:translateY(-6px); } }
+  /* a bot's page */
+  .hero { display:flex; gap:18px; align-items:center; }
+  .hero .who { min-width:0; } .hero .who .nm { font-size:22px; font-weight:700; } .hero .who .nm small { font-size:13px; color:var(--dim); font-weight:normal; margin-left:8px; }
+  /* a project without bots of its own: one line instead of pipeline and figures */
+  .slim { font-size:12px; color:var(--dim); margin-top:2px; } .slim b { color:var(--fg); font-weight:600; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f4f5f7; --fg:#1d2128; --dim:#5d6470; --line:#dcdfe5; --card:#ffffff; --hover:#eef0f4; --star:#d9a400; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation:none !important; transition:none !important; } }
+</style>
+<style id="setcss"></style>
+</head>
+<body>
+<aside id="side"></aside>
+<main>
+<div id="back"></div>
+<h1 id="title">Fleet</h1>
+<div id="meta">loading…</div>
+<div id="root"></div>
+<div id="looks" class="looks"></div>
+</main>
+<script>
+// The frame of the fleet page (fleet-kit). One static page, four views from the same fleet.json
+// (the collector, `fleet collect`, writes it every few minutes): the overview (#), one page per
+// project (#p/<name>), one per bot (#b/<name>) and the machine with the guards (#machine). How
+// the overview looks is a *set*: sets/<name>.js (the kit's default, minimal and fantasy) or
+// assets/sets/<name>.js (an own one), a module that calls fleet.set(name, {overview, project,
+// bot, machine, css, after}) with the frame's helpers below; a set without project, bot or
+// machine gets the frame's plain pages. The JSON says which set to open with (page.set) and
+// which are prepared (page.sets); the viewer may pick another in the line under every view.
+// The frame re-reads the JSON every minute and redraws only when it changed or every 5 min.
+const BASE = /\/$|\.html?$/.test(location.pathname) ? location.pathname.replace(/[^/]*$/, "") : location.pathname + "/";
+const SRC = BASE + "fleet.json";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const tag = (text, cls) => `<span class="tag ${cls||""}">${esc(text)}</span>`;
+const ago = iso => { if (!iso) return "–"; const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+  return m < 60 ? `${m} min` : m < 2880 ? `${Math.round(m/60)} h` : `${Math.round(m/1440)} d`; };
+// a timestamp in the browser's time and locale: "20:09" today, "27.10. 20:09" (or the locale's order) on another day
+const when = iso => { if (!iso) return "–"; const d = new Date(iso); if (isNaN(d)) return String(iso);
+  const t = d.toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit", hour12: false});
+  return ymd(d) === today() ? t : `${d.toLocaleDateString(undefined, {day: "2-digit", month: "2-digit"})} ${t}`; };
+const gh = (repo, kind, n) => `https://github.com/${repo}/${kind}/${n}`;
+const checksCls = c => ({green:"green", red:"red", pending:"amber"})[c] || "";
+const reviewCls = r => ({approved:"green", changes_requested:"red", review_required:"amber"})[r] || "";
+const BAD = new Set(["stuck", "fix-stuck", "offline", "no-review", "unposted", "not-signed-in"]);
+const WORKING = ["running", "build", "fix", "review", "retry"];
+const DONE = ["built", "fix-pushed", "reviewed"];
+const outcomeCls = o => BAD.has(o) ? "red" : DONE.includes(o) ? "green" : WORKING.includes(o) ? "blue" : "";
+const money = x => x == null ? "?" : "$" + Number(x).toFixed(2);
+const nice = s => s === "none" ? "no review" : s.replace(/_/g, " ");
+const plink = name => `#p/${encodeURIComponent(name)}`, blink = name => `#b/${encodeURIComponent(name)}`;
+const sum = a => (a || []).reduce((x, y) => x + y, 0);
+const last = (a, n) => (a || []).slice(-n);
+let data = null;
+// what the file says: the owner (an App's login is app/<owner>-<bot>), the labels' roles, the personas
+const page = () => (data && data.page) || {};
+const labels = () => ({ready: "ready", next: "next", decide: "needs-haku", live: "live", ...(page().labels || {})});
+const who = author => { const a = String(author || ""); if (!a.startsWith("app/")) return a; const o = page().owner; const s = a.slice(4); return o && s.startsWith(o + "-") ? s.slice(o.length + 1) : s; };
+// a dev bot's red pull request gets a fix round by itself; anyone else's red one is the owner's to look at
+const devBot = author => !!data && data.bots.some(b => b.kind === "dev" && b.name === who(author));
+const labelCls = l => { const L = labels(); return l === L.decide ? "red" : l === L.next ? "blue" : l === L.ready ? "green" : ""; };
+const here = b => !!data && b.machine === data.machine.name;   // the bot runs on this machine: its rounds are in the JSON
+const withRounds = b => here(b) && b.rounds !== "none";
+const activeBots = d => d.bots.filter(withRounds);
+
+// ---- this browser's memory: the chosen look, and whatever a set keeps (favourites, budgets) ----
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+};
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const today = () => ymd(new Date());
+
+// ---- identities: a name and a line per bot (the file's persona, or assets/identities.json), a sprite ----
+let identities = {};
+const spriteOk = {};   // bot -> true once its sprite loaded, false when there is none
+const ident = b => identities[b.name] || {};
+const nameOf = b => ident(b).name || (page().personas || {})[b.name] || b.name;
+async function loadIdentities(d) {
+  try { const r = await fetch(BASE + "assets/identities.json", {cache: "no-store"}); if (r.ok) identities = await r.json(); } catch (e) {}
+  for (const b of d.bots) {
+    if (b.name in spriteOk) continue;
+    const img = new Image();
+    img.onload = () => { spriteOk[b.name] = true; render(); };
+    img.onerror = () => { spriteOk[b.name] = false; };
+    img.src = `${BASE}assets/sprites/${encodeURIComponent(b.name)}.png`;
+  }
+}
+
+// ---- what waits on the owner ---------------------------------------------------------------
+// The collector decides the items (merge, decide, step in, with stable ids and when each was
+// first seen), so every browser sees the same. The frame draws them and adds one of its own:
+// a collector that fell silent.
+const STALE_MIN = 20;
+const reviewer = (d, p) => d.bots.find(b => b.project === p.name && b.kind === "plan" && b.rounds === "review");
+const devPRs = p => p.prs.filter(pr => devBot(pr.author) && !pr.draft);
+const queued = p => { const L = labels(); return p.issues.filter(i => i.labels.includes(L.ready) && !i.labels.includes(L.live)); };
+const stale = d => d.generated && (Date.now() - Date.parse(d.generated)) / 60000 > STALE_MIN;
+// a bot's account name in the collector's text becomes its identity's name
+const named = (d, text) => esc(text).replace(/\b[a-z0-9-]+-(?:dev|plan|guard)\b/g, m => { const b = d.bots.find(x => x.name === m); return b ? esc(nameOf(b)) : m; });
+function itemHtml(d, i) {
+  const b = i.bot ? d.bots.find(x => x.name === i.bot) : null;
+  const head = b ? `<a href="${blink(b.name)}">${esc(nameOf(b))}</a> <span class="dim">${esc(b.name)}</span>${i.text ? ": " + esc(i.text) : ""}`
+    : `${i.url ? `<a href="${esc(i.url)}">${esc(i.label || "link")}</a> ` : ""}${esc(i.text || "")}`;
+  const age = i.since && Date.now() - Date.parse(i.since) > 86400e3 ? ` <span class="dim" title="on the list since ${esc(when(i.since))}">· ${ago(i.since)}</span>` : "";
+  return `${head}${i.why ? ` <span class="dim">· ${named(d, i.why)}</span>` : ""}${age}`;
+}
+function actions(d) {
+  const items = (d.items || []).map(i => ({...i, html: itemHtml(d, i)}));
+  if (stale(d)) items.unshift({kind: "step", tag: "stale", cls: "red", project: "fleet", html: `the collector last ran ${esc(ago(d.generated))} ago <span class="dim">· fleet-collect.timer on ${esc(d.machine.name)}</span>`});
+  return items;
+}
+function todo(items) {
+  const section = (kind, title, hint) => {
+    const its = items.filter(i => i.kind === kind);
+    if (!its.length) return "";
+    return `<div class="card"><h3>${title}${tag(its.length, "amber")}</h3><div class="dim hint">${hint}</div>
+      <ul class="todo">${its.map(i => `<li>${tag(i.tag, i.cls)} ${i.html}<span class="p">${esc(i.project)}</span></li>`).join("")}</ul></div>`;
+  };
+  if (!items.length) return "";
+  return `<div class="stack">
+    ${section("merge", "Merge", "pull requests that are reviewed and green, or that nobody else reviews")}
+    ${section("decide", "Decide", "a bot stopped at a question for you")}
+    ${section("step", "Step in", "the fleet cannot go on here without you")}
+  </div>`;
+}
+
+// ---- the history ---------------------------------------------------------------------------
+const hist = d => d.history || {days: [], projects: {}, bots: {}};
+const hp = (d, name) => (hist(d).projects || {})[name] || null;
+const hb = (d, name) => (hist(d).bots || {})[name] || null;
+// a row of little bars, one per day; zero days as a faint stub
+const spark = (arr, cls, days, fmt) => { const m = Math.max(1e-9, ...arr);
+  return `<span class="spark ${cls || ""}">${arr.map((v, i) => `<i class="${v ? "" : "z"}" title="${days ? esc(days[i]) + ": " : ""}${fmt ? fmt(v) : v}" style="height:${v ? Math.max(12, Math.round(v / m * 100)) : 8}%"></i>`).join("")}</span>`; };
+
+// ---- the bots: state, figure, words --------------------------------------------------------
+function botState(b) {
+  if (!withRounds(b)) return "sleep";
+  if (!b.last) return b.timer && !b.timer.active ? "off" : "sleep";
+  if (b.last.signed_in === false || BAD.has(b.last.outcome)) return "bad";
+  if (WORKING.includes(b.last.outcome)) return "work";
+  if (b.timer && !b.timer.active) return "off";
+  if (DONE.includes(b.last.outcome) && Date.now() - Date.parse(b.last.ended) < 3600e3) return "done";
+  return "sleep";
+}
+function robot(state, kind) {
+  const eyes = state === "sleep" || state === "off"
+    ? `<path d="M9 12h3M16 12h3"/>`
+    : `<circle cx="10.5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="17.5" cy="12" r="1.6" fill="currentColor" stroke="none"/>`;
+  const mouth = state === "bad" ? `<path d="M10 17q4-3 8 0"/>` : state === "work" ? `<path d="M10 16h8"/>` : `<path d="M10 16q4 2 8 0"/>`;
+  const tool = state !== "work" ? "" : kind === "plan"
+    ? `<g transform="translate(23 22)"><circle r="2.6"/><path d="M2 2l3 3"/></g>`
+    : `<g transform="translate(23 21) rotate(-35)"><path d="M0 0v8"/><rect x="-3.5" y="-3" width="7" height="3.5" fill="currentColor" stroke="none"/></g>`;
+  return `<svg viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 2v3"/><circle cx="14" cy="2" r="1.2" fill="currentColor" stroke="none"/>
+    <rect x="6" y="5" width="16" height="15" rx="3"/>${eyes}${mouth}
+    <rect x="9" y="21" width="10" height="7" rx="2"/>${tool}</svg>`;
+}
+// the sprite when it loaded, else the robot; z's while asleep; `badge` is extra html inside (a level)
+function figure(b, state, large, badge) {
+  const pic = spriteOk[b.name] ? `<img src="${BASE}assets/sprites/${encodeURIComponent(b.name)}.png" alt="">` : robot(state, b.kind);
+  const z = state === "sleep" ? `<span class="zz">z</span><span class="zz zz2">z</span>` : "";
+  return `<span class="fig${large ? " large" : ""}">${pic}${z}${badge || ""}</span>`;
+}
+const stateWord = (b, st) => { const l = b.last;
+  if (!here(b)) return `on ${b.machine}`;
+  if (b.rounds === "none") return "sessions only";
+  return {sleep: l ? `idle ${ago(l.ended)}` : "no round yet", off: "paused", work: l ? l.what || l.outcome : "", bad: l ? l.what || l.outcome : "", done: l ? `${l.outcome} ${ago(l.ended)} ago` : ""}[st]; };
+// a bot in a project card: the figure, its name, kind and state; `extra` html under the words
+function botFigure(b, extra, badge) {
+  const st = botState(b), l = b.last;
+  return `<div class="bot ${st}" title="${esc(b.name)}: ${esc(l ? l.outcome + (l.what ? " · " + l.what : "") : stateWord(b, st))}">${figure(b, st, false, badge)}
+    <div class="lbl"><b><a href="${blink(b.name)}">${esc(nameOf(b))}</a> <span class="dim" style="font-weight:normal">${esc(b.kind)}</span></b><span class="w">${esc(stateWord(b, st))}</span>${extra || ""}</div></div>`;
+}
+// a bot as one line: a dot in its state, its name, its state in words
+const botLine = b => { const st = botState(b); return `<div class="botline" title="${esc(b.name)}"><i class="dot ${st}"></i><a href="${blink(b.name)}">${esc(nameOf(b))}</a> <span>${esc(b.kind)}</span> · ${esc(stateWord(b, st))}</div>`; };
+
+// ---- a project: the pipeline bar, the tables ----------------------------------------------
+// four stages, the bar fills up to the furthest one that holds work: queue (ready issues),
+// build (the dev bot at work), review (dev pull requests before the plan bot), you (to merge)
+function stages(d, p, items) {
+  const bots = d.bots.filter(b => b.project === p.name && withRounds(b));
+  const dev = bots.find(b => b.kind === "dev"), plan = bots.find(b => b.kind === "plan"), rev = reviewer(d, p);
+  const inReview = rev ? devPRs(p).filter(pr => pr.review !== "approved" && pr.checks !== "red").length : 0;
+  return [
+    {label: "queue", n: queued(p).length},
+    {label: "build", n: dev && botState(dev) === "work" ? 1 : 0, show: dev && botState(dev) === "work" ? "⚒" : ""},
+    {label: "review", n: inReview, on: plan && botState(plan) === "work"},
+    {label: "you", n: items.filter(i => i.project === p.name && i.kind === "merge").length},
+  ];
+}
+function pipelineBar(d, p, items) {
+  const st = stages(d, p, items);
+  let far = -1; st.forEach((s, i) => { if (s.n) far = i; });
+  return `<div class="pipe"><div class="segs">${st.map((s, i) => `<i class="${i <= far ? "on" : ""}${i === 3 && far === 3 ? " you" : ""}"></i>`).join("")}</div>
+    <div class="stages">${st.map((s, i) => `<span class="${i === far ? "now" : ""}">${s.n ? `<b>${esc(s.show || s.n)}</b>` : ""}${s.label}</span>`).join("")}</div></div>`;
+}
+const projectBots = (d, p) => d.bots.filter(b => b.project === p.name && withRounds(b));
+const isPaused = bots => bots.length > 0 && bots.every(b => b.timer && !b.timer.active);
+// the chips in a project card's head: decide and step-in counts, paused, error, the next issue
+function projectChips(d, p, items) {
+  const mine = items.filter(i => i.project === p.name), n = k => mine.filter(i => i.kind === k).length;
+  const next = p.issues.find(i => i.labels.includes(labels().next));
+  return [n("decide") ? tag(`${n("decide")} decide`, "red") : "", n("step") ? tag(`${n("step")} step in`, "red") : "", isPaused(projectBots(d, p)) ? tag("paused") : "", p.error ? tag("error", "red") : "",
+    next ? `<span class="dim" style="font-size:12px">next <a href="${gh(p.repo, "issues", next.number)}">#${next.number}</a></span>` : ""];
+}
+// "2 open pull requests · last merge 3 days ago · by a 77, b 47": a project without bots of its own
+function slimLine(d, p) {
+  const h = hp(d, p.name) || {}, m = h.merged || [], open = p.prs.filter(pr => !pr.draft).length;
+  let lastIdx = -1; m.forEach((v, i) => { if (v > 0) lastIdx = i; });
+  const back = lastIdx < 0 ? null : m.length - 1 - lastIdx;
+  const lastMerge = back == null ? `no merge in ${m.length || 30} days` : back === 0 ? "last merge today" : back === 1 ? "last merge yesterday" : `last merge ${back} days ago`;
+  const by = Object.entries(h.merged_by || {}).sort((a, b) => sum(b[1]) - sum(a[1])).slice(0, 3).map(([a, v]) => `${esc(who(a))} ${sum(v)}`).join(", ");
+  return `<div class="slim"><b>${open}</b> open pull request${open === 1 ? "" : "s"} · ${lastMerge}${by ? ` · by ${by}` : ""}</div>`;
+}
+function prsTable(p) {
+  const rows = p.prs.map(pr => `<tr><td class="n"><a href="${gh(p.repo, "pull", pr.number)}">#${pr.number}</a></td>
+      <td class="t" title="${esc(pr.title)}">${esc(pr.title)}</td>
+      <td class="n">${esc(who(pr.author))}</td>
+      <td class="n">${pr.draft ? tag("draft") : ""}${tag(nice(pr.review), reviewCls(pr.review))}${tag("ci " + pr.checks, checksCls(pr.checks))}${(pr.labels || []).map(l => tag(l, labelCls(l))).join("")}</td>
+      <td class="n dim">${ago(pr.updated)}</td></tr>`).join("");
+  return `<h2>Pull requests<small>${p.prs.length} open</small></h2>
+    ${rows ? `<table><tr><th></th><th>Title</th><th>Author</th><th>State</th><th>Updated</th></tr>${rows}</table>` : `<div class="dim">no open pull requests</div>`}`;
+}
+function issuesTable(p) {
+  const L = labels();
+  const rows = p.issues.map(i => `<tr><td class="n"><a href="${gh(p.repo, "issues", i.number)}">#${i.number}</a></td>
+      <td class="t" title="${esc(i.title)}">${esc(i.title)}</td>
+      <td class="n">${i.labels.map(l => tag(l, labelCls(l))).join("")}</td>
+      <td class="n dim">${ago(i.updated)}</td></tr>`).join("");
+  return `<h2>Issues<small>labelled ${esc(L.ready)}, ${esc(L.next)} or ${esc(L.decide)}</small></h2>
+    ${rows ? `<table><tr><th></th><th>Title</th><th>Labels</th><th>Updated</th></tr>${rows}</table>` : `<div class="dim">none</div>`}`;
+}
+// a bot's card on a project page; `extra` adds rows (a set's mana, say) after the last round, `badge` html into the figure
+function botCard(b, extra, badge) {
+  const st = botState(b), l = b.last, t = b.timer;
+  let rows = "";
+  if (!here(b)) rows = `<tr><td colspan="2" class="dim">on ${esc(b.machine)}; see its <a href="#machine">guard report</a></td></tr>`;
+  else if (b.rounds === "none") rows = `<tr><td colspan="2" class="dim">sessions only, no rounds</td></tr>`;
+  else if (!l) rows = `<tr><td colspan="2" class="dim">no round yet${t ? (t.active ? "; timer on" : "; timer off") : ""}</td></tr>`;
+  else rows = `<tr><td class="n">last ${esc(b.rounds)}</td><td>${tag(l.outcome, outcomeCls(l.outcome))}${l.what ? esc(l.what) : ""} <span class="dim">(${ago(l.ended)} ago, ${l.turns ?? "?"} turns, ${money(l.cost_usd)})</span></td></tr>
+      ${extra ? extra(b) : ""}
+      <tr><td class="n">timer</td><td>${t ? (t.active ? "on" + (t.next ? ", next " + esc(when(t.next)) : "") : tag("off", "red")) : "not installed"}</td></tr>`;
+  return `<div class="card ${st}"><h3><span style="display:flex;gap:10px;align-items:center">${figure(b, st, false, badge ? badge(b) : "")}<span><a href="${blink(b.name)}">${esc(nameOf(b))}</a> <small>${esc(b.name)}</small></span></span>${tag(b.kind, {dev:"blue", plan:"green", guard:"amber"}[b.kind] || "")}</h3>
+    <table>${rows}</table></div>`;
+}
+// a bot's page: the hero (`more` adds to the small line) and the rounds table
+function hero(d, b, more, badge) {
+  const st = botState(b), id = ident(b), p = d.projects.find(x => x.name === b.project);
+  const sprite = spriteOk[b.name] === false ? `<div class="dim hint">no sprite: a square PNG at assets/sprites/${esc(b.name)}.png replaces the robot</div>` : "";
+  return `<div class="card ${st}"><div class="hero">${figure(b, st, true, badge)}
+      <div class="who"><div class="nm">${esc(nameOf(b))}<small>${esc(b.name)} · ${esc(b.kind)} bot of <a href="${plink(b.project)}">${esc(b.project)}</a> on ${esc(b.machine)}${more || ""}</small></div>
+      <div>${esc(id.line || "")}</div>
+      ${p ? `<div class="dim" style="font-size:12px"><a href="https://github.com/${esc(p.repo)}">${esc(p.repo)}</a></div>` : ""}</div></div>${sprite}</div>`;
+}
+function roundsTable(b) {
+  const st = botState(b), l = b.last, t = b.timer;
+  return !here(b) ? `<div class="dim">runs on ${esc(b.machine)}: its state comes with the <a href="#machine">guard report</a></div>`
+    : b.rounds === "none" ? `<div class="dim">works in sessions only, no rounds; nothing to show here yet</div>`
+    : `<table>
+      <tr><td class="n">state</td><td>${tag(st, {work:"blue", done:"green", bad:"red"}[st] || "")} ${esc(stateWord(b, st))}</td></tr>
+      ${l ? `<tr><td class="n">last ${esc(b.rounds)}</td><td>${tag(l.outcome, outcomeCls(l.outcome))}${l.what ? esc(l.what) : ""} <span class="dim">(started ${esc(when(l.started))}, ${ago(l.ended)} ago, ${l.turns ?? "?"} turns, ${money(l.cost_usd)})</span></td></tr>` : ""}
+      <tr><td class="n">today</td><td>${b.rounds_today ?? 0} runs, ${money(b.cost_today)}</td></tr>
+      <tr><td class="n">timer</td><td>${t ? (t.active ? "on" + (t.next ? ", next " + esc(when(t.next)) : "") + (t.last ? ", last " + esc(when(t.last)) : "") : tag("off", "red")) : "not installed"}</td></tr>
+      <tr><td class="n">inbox</td><td>${l ? l.inbox ?? "–" : "–"} ${l && l.signed_in === false ? tag("not signed in", "red") : ""}</td></tr>
+      </table>`;
+}
+
+// ---- the machine and the guards ------------------------------------------------------------
+function guard(g) {
+  if (g.error) return `<div class="card"><h3>${esc(g.host)}</h3><div class="err">${esc(g.error)}</div></div>`;
+  const cls = g.findings.some(f => f.startsWith("CRIT")) ? "red" : g.findings.length ? "amber" : "green";
+  return `<div class="card"><h3>${esc(g.host)}${tag(g.findings.length ? g.findings.length + " open" : "clean", cls)} <small>${g.age_min} min ago</small></h3>
+    <div class="dim">${esc(g.head)}</div>${g.findings.length ? `<pre>${esc(g.findings.join("\n"))}</pre>` : ""}</div>`;
+}
+function machine(m) {
+  const disks = Object.entries(m.disks || {}).map(([d, v]) => `<tr><td class="n">${esc(d)}</td><td>${v.free_gb} GB free of ${v.size_gb}</td></tr>`).join("");
+  const g = m.gpu || {}, hasGpu = Object.keys(g).length > 0;
+  return `<div class="card"><h3>${esc(m.name)} <small>up ${m.uptime_h} h · load ${(m.load||[]).join(" ")}</small></h3>
+    <table>${disks}${hasGpu ? `<tr><td class="n">GPU</td><td>${g.util_pct ?? "?"} % · ${g.mem_used_mb ?? "?"} / ${g.mem_total_mb ?? "?"} MB${g.lock ? tag("lock: " + g.lock, "amber") : ""}</td></tr>` : ""}</table></div>`;
+}
+const guardsLine = d => d.guards.map(x => x.error ? `${esc(x.host)} ${tag("no report", "red")}` :
+  `${esc(x.host)} ${tag(x.findings.length ? x.findings.length + " open" : "clean", x.findings.some(f => f.startsWith("CRIT")) ? "red" : x.findings.length ? "amber" : "green")}`).join(" ");
+
+// ---- the plain pages: what a set gets when it draws only the overview ----------------------
+const plain = {
+  project(d, p) {
+    const items = actions(d), mine = items.filter(i => i.project === p.name), bots = d.bots.filter(b => b.project === p.name);
+    return `${p.error ? `<div class="err">${esc(p.error)}</div>` : ""}
+      <div class="card proj"><h3>Pipeline</h3>${pipelineBar(d, p, items)}
+        ${mine.length ? `<ul class="todo">${mine.map(i => `<li>${tag(i.tag, i.cls)} ${i.html}</li>`).join("")}</ul>` : `<div class="dim">nothing waits on you here</div>`}</div>
+      ${prsTable(p)}${issuesTable(p)}
+      <h2>Bots</h2>
+      ${bots.length ? `<div class="grid">${bots.map(b => botCard(b)).join("")}</div>` : `<div class="dim">no bots of its own</div>`}`;
+  },
+  bot(d, b) {
+    return `${hero(d, b)}<div class="top" style="margin-top:12px"><div class="card"><h3>Rounds</h3>${roundsTable(b)}</div></div>`;
+  },
+  machine(d) {
+    return `<h2>Guards</h2><div class="grid">${d.guards.map(guard).join("")}</div>
+      <h2>Machine</h2><div class="grid">${machine(d.machine)}</div>
+      <h2>Guard bots</h2><div class="grid">${d.bots.filter(b => b.kind === "guard").map(b => botCard(b)).join("")}</div>`;
+  },
+};
+
+// ---- the side menu ----------------------------------------------------------------------------
+// overview (with the count of what waits), the projects (a set may put some first: `pinned`),
+// each with its bots and their state as a dot, the machine; the current page is marked
+function sideMenu(d, h, pinned) {
+  const items = actions(d), cnt = {};
+  for (const i of items) cnt[i.project] = (cnt[i.project] || 0) + 1;
+  const at = key => key === h ? " now" : "", badge = (n, cls) => n ? `<span class="cnt ${cls || ""}">${esc(n)}</span>` : "";
+  const proj = p => `<a class="pl${at("p/" + p.name)}" href="${plink(p.name)}">${pinned.includes(p.name) ? "★ " : ""}${esc(p.name)}${badge(cnt[p.name])}</a>` +
+      projectBots(d, p).map(b => `<a class="bl${at("b/" + b.name)}" href="${blink(b.name)}" title="${esc(b.name)}"><i class="dot ${botState(b)}"></i>${esc(nameOf(b))}</a>`).join("");
+  const fav = d.projects.filter(p => pinned.includes(p.name)), rest = d.projects.filter(p => !pinned.includes(p.name));
+  const alarm = d.guards.some(g => g.error || g.findings.some(f => f.startsWith("CRIT")));
+  return `<a class="pl${at("")}" href="#">Overview${badge(items.length)}</a>
+    ${fav.length ? `<div class="sec">Favourites</div>${fav.map(proj).join("")}` : ""}
+    <div class="sec">${fav.length ? "Other projects" : "Projects"}</div>${rest.map(proj).join("")}
+    <div class="sec">Machine</div><a class="pl${at("machine")}" href="#machine">${esc(d.machine.name)}${badge(alarm ? "!" : "", "red")}</a>`;
+}
+
+// ---- the sets ---------------------------------------------------------------------------------
+const sets = {};        // name -> {title, css, overview, project, bot, machine, after, pinned}
+const loading = {};     // name -> promise
+const fleet = {set(name, def) { sets[name] = {title: name, ...def}; },
+  // the helpers a set may use
+  esc, tag, ago, when, gh, money, nice, who, devBot, plink, blink, sum, last, store, today, labels, page,
+  ident, nameOf, spriteOk, BASE, here, withRounds, activeBots, reviewer, devPRs, queued, stale, named, itemHtml, actions, todo,
+  hist, hp, hb, spark, botState, robot, figure, stateWord, botFigure, botLine, stages, pipelineBar, projectBots, isPaused, projectChips,
+  slimLine, prsTable, issuesTable, botCard, hero, roundsTable, guard, machine, guardsLine, plain, checksCls, reviewCls, labelCls, outcomeCls,
+  BAD, WORKING, DONE, render: () => render(), get data() { return data; }};
+window.fleet = fleet;
+// a set's script: the kit's sets/, else assets/sets/ next to the page (an own one)
+function loadSet(name) {
+  if (sets[name]) return Promise.resolve(sets[name]);
+  if (!loading[name]) loading[name] = new Promise(resolve => {
+    const tryUrl = (urls) => {
+      if (!urls.length) return resolve(null);
+      const s = document.createElement("script"); s.src = urls[0];
+      s.onload = () => resolve(sets[name] || null); s.onerror = () => { s.remove(); tryUrl(urls.slice(1)); };
+      document.head.appendChild(s);
+    };
+    tryUrl([`${BASE}sets/${encodeURIComponent(name)}.js`, `${BASE}assets/sets/${encodeURIComponent(name)}.js`]);
+  });
+  return loading[name];
+}
+const offered = () => { const p = page(); const l = Array.isArray(p.sets) && p.sets.length ? p.sets : ["default"]; return l.includes(p.set || "default") ? l : [p.set || "default", ...l]; };
+const chosenName = () => { const v = store.get("fleet.set", null); return offered().includes(v) ? v : (page().set || "default"); };
+let current = null;   // the set drawing now
+let setNote = "";     // when the chosen set could not be loaded
+async function chooseSet() {
+  const want = chosenName();
+  let s = await loadSet(want);
+  setNote = s ? "" : `the look "${want}" did not load (sets/${want}.js or assets/sets/${want}.js), showing default`;
+  if (!s && want !== "default") s = await loadSet("default");
+  if (!s) s = {title: "none", overview: d => todo(actions(d)) || `<div class="dim">nothing waits on you</div>`};
+  if (current !== s) { current = s; document.getElementById("setcss").textContent = s.css || ""; }
+  return s;
+}
+function looksLine(S) {
+  const names = offered();
+  if (names.length < 2 && !setNote) return "";
+  return `look: ${names.map(n => `<a href="#" data-set="${esc(n)}" class="${sets[n] === S ? "now" : ""}">${esc(n)}</a>`).join("")}${setNote ? `<span class="err"> · ${esc(setNote)}</span>` : ""}`;
+}
+
+// ---- the routing -------------------------------------------------------------------------------
+let rendered = {gen: null, at: 0};   // what the page shows: which fleet.json and when it was drawn
+let drawing = false;
+async function render() {
+  if (!data || drawing) return;
+  drawing = true;
+  try {
+    const S = await chooseSet();
+    rendered = {gen: data.generated, at: Date.now()};
+    const h = decodeURIComponent(location.hash.replace(/^#\/?/, ""));
+    const title = document.getElementById("title"), root = document.getElementById("root");
+    const pinned = typeof S.pinned === "function" ? S.pinned(data) : [];
+    document.getElementById("side").innerHTML = sideMenu(data, h, pinned);
+    document.getElementById("back").innerHTML = h ? `<a class="back" href="#">← overview</a>` : "";
+    const fleetName = page().fleet ? `${page().fleet} fleet` : "Fleet";
+    if (h.startsWith("p/")) {
+      const name = h.slice(2), p = data.projects.find(x => x.name === name);
+      title.innerHTML = `${esc(name)}${p ? `<small><a href="https://github.com/${esc(p.repo)}">${esc(p.repo)}</a></small>` : ""}`;
+      document.title = `${name} · Fleet`;
+      root.innerHTML = p ? (S.project || plain.project)(data, p) : `<div class="err">no project "${esc(name)}"</div>`;
+    } else if (h.startsWith("b/")) {
+      const name = h.slice(2), b = data.bots.find(x => x.name === name);
+      title.textContent = b ? nameOf(b) : name; document.title = `${b ? nameOf(b) : name} · Fleet`;
+      root.innerHTML = b ? (S.bot || plain.bot)(data, b) : `<div class="err">no bot "${esc(name)}"</div>`;
+    } else if (h === "machine") {
+      title.textContent = `${data.machine.name} and the guards`; document.title = "machine · Fleet";
+      root.innerHTML = (S.machine || plain.machine)(data);
+    } else {
+      title.textContent = fleetName; document.title = "Fleet";
+      root.innerHTML = S.overview(data);
+    }
+    document.getElementById("looks").innerHTML = looksLine(S);
+    for (const a of document.querySelectorAll("#looks a[data-set]")) a.onclick = e => { e.preventDefault(); store.set("fleet.set", a.dataset.set); render(); };
+    if (S.after) S.after(root, data);
+  } finally { drawing = false; }
+}
+
+// every minute: fetch the JSON (no-cache: the browser asks the server whether it changed and
+// gets a 304 when not, instead of the whole file), refresh the "collected" line, and redraw
+// only when the JSON is new or the last drawing is 5 min old (the "ago"s age on the page
+// itself): a redraw while the viewer hovers a tooltip would close it
+const REDRAW_MIN = 5;
+async function load() {
+  if (document.activeElement && document.activeElement.tagName === "INPUT") return;   // mid-edit
+  try {
+    const r = await fetch(SRC, {cache: "no-cache"}); if (!r.ok) throw new Error(`HTTP ${r.status}`); data = await r.json();
+    document.getElementById("meta").textContent = `collected ${ago(data.generated)} ago · ${when(data.generated)}` + (data.error ? " · " + data.error : "");
+    if (!Object.keys(identities).length) await loadIdentities(data);
+    if (data.generated !== rendered.gen || Date.now() - rendered.at > REDRAW_MIN * 60e3) render();
+  } catch (e) { document.getElementById("meta").innerHTML = `<span class="err">fleet.json: ${esc(e)}</span>`; }
+}
+window.addEventListener("hashchange", render);
+load(); setInterval(load, 60000);
+</script>
+</body>
+</html>
