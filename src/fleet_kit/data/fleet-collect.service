@@ -1,0 +1,42 @@
+[Unit]
+Description=fleet-collect: the fleet page's JSON, as {guard} (fleet apply page)
+Documentation=https://github.com/haku767/fleet-kit
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User={guard}
+Environment=HOME={home}
+ExecStart=/usr/local/bin/fleet collect /etc/fleet/fleet.toml
+TimeoutStartSec=5min
+Nice=10
+UMask=022
+
+# The sandbox: the collector only reads, apart from the JSON and the sets' state files under
+# {agents_dir}/fleet and fleet-token's hourly token cache in the guard's ~/.cache (a read-only
+# cache would kill the token after an hour). Everything else is read-only, /home, /root and
+# /run/user are gone, no new privileges, no capabilities, only the service syscalls. A set's
+# collector half (assets/sets/<name>.py) runs inside this too. Check after a change:
+# journalctl -u fleet-collect -n 20, systemd-analyze security fleet-collect.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths={agents_dir}/fleet -{home}/.cache
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+{gpu}

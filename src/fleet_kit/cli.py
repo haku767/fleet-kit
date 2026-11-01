@@ -2,9 +2,10 @@
 
 import argparse
 import os
+import subprocess
 import sys
 
-from . import __version__, accounts, collect, doctor, edit, labels, machine, model, render, rounds, ruleset, status
+from . import __version__, accounts, collect, doctor, edit, labels, machine, model, page, render, rounds, ruleset, status
 from .github import GH, GHError
 
 DEFAULT_CONF_DIR = "/etc/fleet/bots"
@@ -16,7 +17,6 @@ def default_file():
     """The file when the command names none: fleet.toml in the working directory (a clone),
     else the installed one. A name that exists nowhere stays `fleet.toml`, so the error names it."""
     return "fleet.toml" if os.path.exists("fleet.toml") or not os.path.exists(INSTALLED_FILE) else INSTALLED_FILE
-NEXT = "not yet: fleet PLANS 13, stage 3"
 
 
 def load_checked(file, cmd):
@@ -123,15 +123,72 @@ def cmd_apply_system(args, doc):
     return 0
 
 
+def print_actions(args, actions, what, where):
+    for w, path in actions:
+        if w != "kept" or args.verbose:
+            print(f"{'would be ' if args.dry_run else ''}{w}: {path}")
+    n = sum(1 for w, _ in actions if w not in ("kept", "skipped"))
+    print(f"fleet apply {what}: {n} change{'s' if n != 1 else ''}, {len(actions) - n} unchanged or skipped, {where}"
+          + (" (dry run)" if args.dry_run else ""))
+
+
+def cmd_apply_kit(args):
+    """`fleet apply kit`: this kit as a root-owned copy with the `fleet` launcher (what the page's unit runs)."""
+    root = args.dir or "/"
+    if root == "/" and os.geteuid() != 0 and not args.dry_run:
+        print(f"fleet apply kit: installing to {page.KIT_DIR} and {page.LAUNCHER} needs root (sudo), or --dir <root> for a trial", file=sys.stderr)
+        return 1
+    actions = page.apply_kit(root=root, dry_run=args.dry_run)
+    print_actions(args, actions, "kit", f"from {page.package_dir()}")
+    return 1 if any(w == "missing" for w, _ in actions) else 0
+
+
+def cmd_apply_page(args, doc):
+    """`fleet apply page`: the file, the page directory, the kit's page files and --assets, the collector's unit and timer."""
+    machine_name = args.machine or os.uname().nodename
+    if machine_name not in (doc.get("machines") or {}):
+        print(f"fleet apply page: this host is `{machine_name}`, not a machine in the file; --machine names one", file=sys.stderr)
+        return 1
+    root = args.dir or "/"
+    if root == "/" and os.geteuid() != 0 and not args.dry_run:
+        print(f"fleet apply page: writing {page.FLEET_FILE}, the page directory and /etc/systemd/system needs root (sudo), or --dir <root> for a trial",
+              file=sys.stderr)
+        return 1
+    try:
+        text = open(args.file).read()
+    except OSError as e:
+        print(f"fleet apply page: {e}", file=sys.stderr)
+        return 1
+    actions = page.apply_page(doc, machine_name, text, root=root, dry_run=args.dry_run, assets=args.assets, start=args.start)
+    print_actions(args, actions, "page", f"on {machine_name}")
+    if any(w == "missing" for w, _ in actions):
+        return 1
+    m = doc["machines"][machine_name]
+    if m.get("role") == "bots" and m.get("family") != "nixos":
+        status = None
+        if ((m.get("page") or {}).get("serve") == "tailscale") and root == "/":
+            try:
+                status = subprocess.run(["tailscale", "serve", "status"], capture_output=True, text=True, timeout=15).stdout
+            except (OSError, subprocess.TimeoutExpired):
+                status = None
+        agents_dir = (doc.get("fleet") or {}).get("agents_dir", "/srv/agents")
+        print("\n".join(page.serve_hints(m, agents_dir, status)))
+    return 0
+
+
 def cmd_apply(args):
-    if args.what not in ("conf", "lists", "rounds", "accounts", "inbox"):
-        print(f"fleet apply: conf, lists, rounds, accounts or inbox ({NEXT})", file=sys.stderr)
+    if args.what not in ("conf", "lists", "rounds", "accounts", "inbox", "kit", "page"):
+        print(f"fleet apply: conf, lists, rounds, accounts, inbox, kit or page", file=sys.stderr)
         return 2
+    if args.what == "kit":
+        return cmd_apply_kit(args)
     doc = load_checked(args.file, "apply")
     if doc is None:
         return 1
     if args.what == "rounds":
         return cmd_apply_rounds(args, doc)
+    if args.what == "page":
+        return cmd_apply_page(args, doc)
     if args.what in ("accounts", "inbox"):
         return cmd_apply_system(args, doc)
     default_dir = DEFAULT_CONF_DIR if args.what == "conf" else DEFAULT_LISTS_DIR
@@ -413,11 +470,6 @@ def cmd_status(args):
     return status.main(path, args.project)
 
 
-def cmd_later(args):
-    print(f"fleet {args.command}: {NEXT}", file=sys.stderr)
-    return 2
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="fleet", description="one fleet.toml and the fleet around it")
     ap.add_argument("--version", action="version", version=f"fleet-kit {__version__}")
@@ -433,13 +485,18 @@ def main(argv=None):
     a = sub.add_parser("apply", help="put the fleet on this machine (sudo): `apply conf` writes /etc/fleet/bots, "
                                      "`apply lists` /etc/fleet/lists.sh and courier.sh, `apply accounts` the bots' Unix accounts, "
                                      "homes and scratch directories, `apply inbox` the inboxes with their ACLs, `apply rounds` "
-                                     "bot-round, bot-review, fleet-token, their units and the bots' timers")
-    a.add_argument("what", metavar="conf|lists|accounts|inbox|rounds")
+                                     "bot-round, bot-review, fleet-token, their units and the bots' timers, `apply kit` this kit "
+                                     f"as a root-owned copy with the `fleet` launcher ({page.KIT_DIR}), `apply page` the file as "
+                                     f"{page.FLEET_FILE}, the page directory with the kit's page files and --assets, the collector's "
+                                     "unit and timer")
+    a.add_argument("what", metavar="conf|lists|accounts|inbox|rounds|kit|page")
     a.add_argument("file", nargs="?", default=None)
     a.add_argument("--dir", help=f"directory to write into (default {DEFAULT_CONF_DIR} for conf, {DEFAULT_LISTS_DIR} for lists; "
-                                 "for rounds a root to prefix /usr/local/bin and /etc with, a trial)")
-    a.add_argument("--machine", help="for lists and rounds: the machine from the file (default: this host's name)")
-    a.add_argument("--start", action="store_true", help="for rounds: start the enabled timers too (default: enable only)")
+                                 "for rounds, kit and page a root to prefix /usr/local, /etc and the agents directory with, a trial)")
+    a.add_argument("--machine", help="for lists, rounds and page: the machine from the file (default: this host's name)")
+    a.add_argument("--start", action="store_true", help="for rounds: start the enabled timers too (default: enable only); "
+                                                        "for page: run the collector once now")
+    a.add_argument("--assets", help="for page: a directory mirrored into the page's assets/ (identities, sprites, own sets), root-owned")
     a.add_argument("--dry-run", action="store_true", help="say what would change, write nothing")
     a.add_argument("-v", "--verbose", action="store_true", help="list the unchanged files too")
     a.set_defaults(func=cmd_apply)
@@ -498,10 +555,6 @@ def main(argv=None):
     st.add_argument("file", nargs="?", default=None)
     st.add_argument("--json", dest="json_path", help="the JSON to read (default <agents_dir>/fleet/fleet.json from the file)")
     st.set_defaults(func=cmd_status)
-    for name, help_ in (("page", "install collector and page"),):
-        p = sub.add_parser(name, help=f"{help_} ({NEXT.split(':')[0]})")
-        p.add_argument("rest", nargs="*")
-        p.set_defaults(func=cmd_later)
     # `fleet add-project tool --repo o/r --stack py fleet.toml` has a positional after the options;
     # parse_args refuses that before Python 3.12, parse_intermixed_args knows no subparsers, so the
     # subcommand is picked out here and its parser parses the rest intermixed

@@ -1,0 +1,10 @@
+[Unit]
+Description=fleet-collect every {every}
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec={every}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
