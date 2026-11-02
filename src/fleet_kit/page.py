@@ -66,11 +66,12 @@ def source_note(src, run=None):
     """Where the copy came from: the path and, for a git checkout, its commit."""
     run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout)
     commit = "-"
+    git = ["git", "-c", f"safe.directory={src}", "-C", str(src)]   # root reading another user's clone
     try:
-        head = run(["git", "-C", str(src), "rev-parse", "HEAD"]).strip()
+        head = run([*git, "rev-parse", "HEAD"]).strip()
         if re.fullmatch(r"[0-9a-f]{40}", head):
             commit = head
-            if run(["git", "-C", str(src), "status", "--porcelain", "--", "."]).strip():
+            if run([*git, "status", "--porcelain", "--", "."]).strip():
                 commit += " (with local changes)"
     except (OSError, subprocess.TimeoutExpired):
         pass
