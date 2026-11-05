@@ -232,7 +232,7 @@ class ServeHintTests(unittest.TestCase):
     def test_tailscale_old_entries_and_the_directory(self):
         lines = page.serve_hints({"page": {"serve": "tailscale", "path": "/fleet"}}, "/srv/agents", TS_STATUS)
         self.assertIn("  sudo tailscale serve --bg --set-path /fleet off   # an older entry under /fleet", lines)
-        self.assertIn("  sudo tailscale serve --bg --set-path /fleet/assets off   # an older entry under /fleet", lines)
+        self.assertIn("  sudo tailscale serve --bg --set-path /fleet/assets/ off   # an older entry under /fleet", lines)   # the slash: as listed
         self.assertIn("  sudo tailscale serve --bg --set-path /fleet/fleet.json off   # an older entry under /fleet", lines)
         self.assertTrue(any(l.startswith("  sudo tailscale serve --bg --set-path /fleet /srv/agents/fleet") for l in lines))
         self.assertFalse(any("/ off" in l for l in lines))   # the root proxy is not ours
