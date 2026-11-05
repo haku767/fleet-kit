@@ -8,7 +8,7 @@ there; the machine's `admin` (an optional `[machines.<m>] admin = "<login>"`) in
 group, so it reads the homes. ssh keys, sudoers, deploy wrappers and anything else the machine
 needs stay with the machine's own install script.
 
-inbox: `agents_dir/inbox/<name>/` for every bot and guard of the fleet (the register names;
+inbox: `agents_dir/inbox/<name>/` for every bot, guard and agent of the fleet (the register names;
 the courier carries notes to the other machine), owned by its recipient when that lives here,
 else by the courier guard that delivers for it; mode 1730 (the agents group may drop a note,
 not list), `done/` (and `sent/` for a courier guard) 700, and the ACLs haku's fleet uses: the
@@ -219,6 +219,13 @@ def inbox_owner(doc, fl, name, machine, here_accounts):
         if g.get("machine") == machine:
             return name
         return name if name in here_accounts else None
+    a = (doc.get("agents") or {}).get(name)
+    if a:   # a person's own session: its login owns the inbox where it runs, elsewhere the courier
+        if a.get("machine") == machine:
+            return a.get("account")
+        g = (machines.get(a.get("machine")) or {}).get("guard") or \
+            next((g for g, gv in (doc.get("guards") or {}).items() if gv.get("machine") == a.get("machine")), None)
+        return g if g in here_accounts else None
     return None
 
 
@@ -234,7 +241,7 @@ def apply_inbox(doc, machine, root="/", dry_run=False, run=None, user_exists=Non
     out.append((s.ensure_dir(inbox, 0o755, "root", "root", fix_owner=False), inbox))
     couriers = courier_guards(doc, machine)
     here = {acct for *_, acct, bm in fl.bots() if bm == machine} | set(couriers) | {g for g, gv in (doc.get("guards") or {}).items() if gv.get("machine") == machine}
-    names = [b["name"] for *_, b, _a, _m in fl.bots()] + sorted(doc.get("guards") or {})
+    names = [b["name"] for *_, b, _a, _m in fl.bots()] + sorted(doc.get("guards") or {}) + sorted(fl.agents)
     for name in names:
         owner = inbox_owner(doc, fl, name, machine, here)
         if owner is None or not s.user(owner):

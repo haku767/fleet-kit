@@ -41,6 +41,7 @@ KEYS = {
                 "reviews"},
     "bot": {"name", "account", "app", "persona", "budget_usd", "machine"},
     "guard": {"machine", "project", "persona", "apps"},
+    "agent": {"machine", "account", "persona"},
     "person": {"role", "projects"},
     "label": {"color", "description"},
 }
@@ -232,6 +233,20 @@ def check(text, doc):
             err(w, "apps must list the guard's App slug (and a second App per foreign owner)")
         if "project" in g and g["project"] not in (doc.get("projects") or {}):
             err(w, f"project `{g['project']}` is not in [projects]")
+    # [agents.<name>]: a person's own session with an inbox of its own (no rounds, no App, no
+    # account of its own): machine says where it runs, account the login it runs in, the inbox's
+    # owner there. The courier carries its mail like a bot's; elsewhere the courier guard owns it.
+    agents = tables("agents")
+    bot_names = {x.name for x in bots(doc)}
+    for aname, a in agents.items():
+        w = f"agents.{aname}"
+        keys(w, a, KEYS["agent"])
+        if a.get("machine") not in machines:
+            err(w, "machine must name a machine")
+        if not isinstance(a.get("account"), str) or not a["account"]:
+            err(w, "account must name the login the session runs in (the inbox's owner there)")
+        if aname in bot_names or aname in guard_names:
+            err(w, "the name is a bot's or a guard's already")
     for mname, m in machines.items():
         if "guard" in m and m["guard"] not in guard_names:
             err(f"machines.{mname}", f"guard `{m['guard']}` is not in [guards]")
@@ -330,4 +345,5 @@ def summary(doc):
     with_bots = sum(1 for p in projects.values() if isinstance(p, dict) and (p.get("plan") or p.get("dev")))
     return (f"{len(doc.get('machines') or {})} machines, {len(doc.get('stacks') or {})} stacks, "
             f"{len(projects)} projects ({with_bots} with bots), {len(b)} bots, "
-            f"{len(doc.get('guards') or {})} guards, {len(doc.get('people') or {})} people")
+            f"{len(doc.get('guards') or {})} guards, {len(doc.get('people') or {})} people"
+            + (f", {len(doc['agents'])} agents" if doc.get("agents") else ""))

@@ -18,7 +18,9 @@ is a machine's own (ssh keys, sudoers, deploy wrappers) and the page (haku's fle
 
 `fleet.toml` holds every fact about the fleet once: the owner, the machines, the stacks (test
 command, allow list, environment), the projects with their two bots, the guards, the
-people who may set `ready`. Never a secret: App keys, runner tokens and the Claude logins
+people who may set `ready`, and the agents: a person's own sessions that want an inbox of
+their own (`[agents.<name>]` with `machine` and `account`; no rounds, no App, the courier
+carries their mail like a bot's). Never a secret: App keys, runner tokens and the Claude logins
 stay on the machine. [`examples/minimal.toml`](examples/minimal.toml) is the smallest fleet,
 one machine, one project, two bots; haku's own file, two machines and seven projects, is in
 haku767/fleet.
