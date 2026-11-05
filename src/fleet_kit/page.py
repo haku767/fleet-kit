@@ -274,8 +274,8 @@ def serve_hints(m, agents_dir, status=None):
         have = any(mt.rstrip("/") == path and tg == d for mt, tg in mounts)
         stale = [mt for mt, tg in mounts if (mt.rstrip("/") == path and tg != d) or mt.rstrip("/").startswith(path + "/")]
         out = [f"tailscale serve (the owner's, once): {'the page directory is in place' if have else 'the page directory under ' + path}"]
-        for mt in stale:
-            out.append(f"  sudo tailscale serve --bg --set-path {mt.rstrip('/')} off   # an older entry under {path}")
+        for mt in stale:   # the mount as status lists it, slash and all: `off` wants it exactly so
+            out.append(f"  sudo tailscale serve --bg --set-path {mt} off   # an older entry under {path}")
         if not have:
             out.append(f"  sudo tailscale serve --bg --set-path {path} {d}   # the directory: index.html, fleet.json, sets/, assets/")
         out.append("  tailscale serve status")
