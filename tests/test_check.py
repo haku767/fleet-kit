@@ -199,3 +199,30 @@ class ApplyListsTests(unittest.TestCase):
             acts = render.apply_lists(files, "desk", d)
             self.assertEqual(sorted(os.listdir(d)), ["courier.sh", "mine.sh"])
             self.assertEqual([w for w, _ in render.apply_lists(files, "desk", d)], ["kept"])
+
+
+class AgentsTests(unittest.TestCase):
+    """[agents.<name>]: a person's own session with an inbox; the courier carries its mail."""
+    TEXT = MINIMAL.read_text() + (
+        '\n[machines.desk]\nrole = "guard"\nfamily = "nixos"\nhome_root = "/srv"\n'
+        'courier = { to = "box", every = "15m", ssh = "box-drop" }\n[guards.g]\nmachine = "desk"\napps = ["x-g"]\n'
+        '[agents.hand]\nmachine = "desk"\naccount = "me"\n')
+
+    def test_courier_carries_an_agents_mail(self):
+        doc = tomllib.loads(self.TEXT)
+        self.assertEqual([f.level for f in model.check(self.TEXT, doc) if f.level == "error"], [])
+        files = render.render(doc)
+        courier = files["machines/desk/courier.sh"]
+        self.assertIn("from_bots='g hand'", courier)
+        self.assertIn("from_agents='hand=me'", courier)
+        self.assertNotIn("hand", courier.split("to_bots=")[1].split("\n")[0])
+        self.assertNotIn("hand", files["machines/box/lists.sh"])   # no account to create on the bots machine
+
+    def test_agent_needs_machine_and_account(self):
+        text = self.TEXT.replace('machine = "desk"\naccount = "me"\n', 'machine = "nowhere"\n')
+        msgs = [f.message for f in model.check(text, tomllib.loads(text)) if f.level == "error"]
+        self.assertTrue(any("machine must name a machine" in m for m in msgs), msgs)
+        self.assertTrue(any("account must name the login" in m for m in msgs), msgs)
+        text = self.TEXT.replace("[agents.hand]", "[agents.g]")
+        msgs = [f.message for f in model.check(text, tomllib.loads(text)) if f.level == "error"]
+        self.assertTrue(any("a bot's or a guard's already" in m for m in msgs), msgs)

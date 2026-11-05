@@ -364,8 +364,9 @@ def run(doc, machine=None, root="/", systemctl=None, user_of=None, owner_of=None
         out += check_account(host, fl, g, machine, f"account:{g}")
     out.append(check_lists(host, m, rendered, machine))
     out += check_scripts(host, m)
-    # every bot and guard of the fleet has an inbox here: the courier carries the notes across
+    # every bot, guard and agent of the fleet has an inbox here: the courier carries the notes across
     accounts = {b["name"]: a for *_, b, a, _m in fl.bots()}
+    accounts.update({a: av.get("account", a) for a, av in sorted(fl.agents.items())})
     for name in list(accounts) + sorted(guards):
         out.append(check_inbox(host, agents_dir, name, accounts.get(name, name), guards, f"inbox:{name}"))
     out += check_agents(host, agents_dir, machine, m.get("guard"))

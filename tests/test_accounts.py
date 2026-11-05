@@ -193,6 +193,17 @@ class InboxTests(unittest.TestCase):
         acts = self.apply(load(), rec)
         self.assertEqual({w for w, x in acts if "inbox/myapp" in x and "(" in x}, {"kept"})
 
+    def test_agent_inbox_is_the_couriers_elsewhere_and_the_logins_at_home(self):
+        rec = Recorder(users={"myapp-dev", "myapp-plan", "lap-guard", "me"})
+        doc = load(courier=True)
+        doc["agents"] = {"hand": {"machine": "laptop", "account": "me"},        # a session on the laptop
+                         "desk-hand": {"machine": "box", "account": "me"}}      # a session here, in me's login
+        acts = self.apply(doc, rec)
+        self.assertTrue(any(w != "skipped" and "/srv/agents/inbox/hand (1730, lap-guard:agents)" in x for w, x in acts), acts)
+        self.assertTrue(any(w != "skipped" and "/srv/agents/inbox/desk-hand (1730, me:agents)" in x for w, x in acts), acts)
+        self.assertTrue((self.root / "srv/agents/inbox/hand/done").is_dir())
+        self.assertFalse((self.root / "srv/agents/inbox/hand/sent").exists())   # not a courier's own inbox
+
 
 if __name__ == "__main__":
     unittest.main()

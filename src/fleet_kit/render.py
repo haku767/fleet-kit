@@ -48,6 +48,7 @@ class Fleet:
         self.stacks = doc.get("stacks") or {}
         self.projects = doc.get("projects") or {}
         self.guards = doc.get("guards") or {}
+        self.agents = doc.get("agents") or {}   # a person's own sessions with an inbox
         self.bots_machines = [m for m, v in self.machines.items() if v.get("role") == "bots"]
 
     def app(self, bot):
@@ -218,14 +219,20 @@ def lists(fl):
             continue
         to = c["to"]
         to_names = [g for g, gv in fl.guards.items() if gv.get("machine") == to] + \
-                   [b["name"] for *_, b, _a, bm in all_bots if bm == to]
+                   [b["name"] for *_, b, _a, bm in all_bots if bm == to] + \
+                   [a for a, av in fl.agents.items() if av.get("machine") == to]
         from_names = [g for g, gv in fl.guards.items() if gv.get("machine") == mname] + \
-                     [b["name"] for *_, b, _a, bm in all_bots if bm == mname]
+                     [b["name"] for *_, b, _a, bm in all_bots if bm == mname] + \
+                     [a for a, av in fl.agents.items() if av.get("machine") == mname]
+        # from_agents: the [agents] on this machine with the login that owns each inbox here
+        # (name=account), for a machine whose module declares the inboxes (NixOS)
+        from_agents = [f"{a}={av.get('account', '')}" for a, av in fl.agents.items() if av.get("machine") == mname]
         out[f"machines/{mname}/courier.sh"] = (
             f"# /etc/fleet/courier.sh: written by `fleet apply lists` from fleet.toml ({fl.fleet.get('name', '')}) for {mname}"
             f" (inbox names, the register's); do not edit\n"
             f"to_host={q(to)}\nto_ssh={q(c.get('ssh', ''))}\nevery={q(c.get('every', '15m'))}\n"
-            f"to_bots={q(' '.join(to_names))}\nfrom_bots={q(' '.join(from_names))}\n")
+            f"to_bots={q(' '.join(to_names))}\nfrom_bots={q(' '.join(from_names))}\n"
+            f"from_agents={q(' '.join(from_agents))}\n")
     return out
 
 
