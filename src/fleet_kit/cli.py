@@ -113,6 +113,9 @@ def cmd_apply_system(args, doc):
         print(f"fleet apply {args.what}: useradd, chown and setfacl need root (sudo), or --dir <root> for a trial", file=sys.stderr)
         return 1
     fn = accounts.apply_accounts if args.what == "accounts" else accounts.apply_inbox
+    # which file, and what it holds: the installed one can lag behind the register (an [agents]
+    # entry merged but not yet installed gave a silent run without the new inbox, 2026-11-05)
+    print(f"fleet apply {args.what}: {args.file}: {model.summary(doc)}")
     actions = fn(doc, machine_name, root=root, dry_run=args.dry_run)
     for what, path in actions:
         if what != "kept" or args.verbose:

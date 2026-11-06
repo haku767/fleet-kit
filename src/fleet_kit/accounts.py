@@ -30,6 +30,24 @@ from . import render
 GROUP = "agents"
 
 
+def has_acl(p):
+    """Whether the directory carries a POSIX ACL (named entries, so a mask)."""
+    try:
+        os.getxattr(p, "system.posix_acl_access")
+        return True
+    except OSError:
+        return False
+
+
+def same_mode(p, mode):
+    """The directory's mode is the wanted one. With an ACL the group bits of st_mode show the
+    mask, not the group entry (an inbox with the admin's entry reads 1770 for 1730), so there
+    the group bits are left out: a chmod would only have the setfacl lines put the mask back
+    (ws-guard, 2026-11-05: every dry run reported every inbox as changed)."""
+    cur = stat.S_IMODE(p.stat().st_mode)
+    return cur == mode or (has_acl(p) and (cur & ~0o070) == (mode & ~0o070))
+
+
 class System:
     def __init__(self, root="/", run=None, dry_run=False, user_exists=None, group_exists=None, owner_of=None):
         self.root = Path(root)
@@ -107,7 +125,7 @@ class System:
         p = self.path(rel)
         was = p.is_dir()
         wrong_owner = was and fix_owner and user is not None and self.owner(p) not in (None, user)
-        if was and stat.S_IMODE(p.stat().st_mode) == mode and not wrong_owner:
+        if was and same_mode(p, mode) and not wrong_owner:
             return "kept"
         if not self.dry_run:
             p.mkdir(parents=True, exist_ok=True)
