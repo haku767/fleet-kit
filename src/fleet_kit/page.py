@@ -66,7 +66,9 @@ def source_note(src, run=None):
     """Where the copy came from: the path and, for a git checkout, its commit."""
     run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout)
     commit = "-"
-    git = ["git", "-c", f"safe.directory={src}", "-C", str(src)]   # root reading another user's clone
+    # root reading another user's clone: safe.directory must name the repository's top level, and
+    # src is the package directory inside it, so the wildcard; read-only commands follow
+    git = ["git", "-c", "safe.directory=*", "-C", str(src)]
     try:
         head = run([*git, "rev-parse", "HEAD"]).strip()
         if re.fullmatch(r"[0-9a-f]{40}", head):
