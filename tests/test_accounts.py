@@ -204,6 +204,19 @@ class InboxTests(unittest.TestCase):
         self.assertTrue((self.root / "srv/agents/inbox/hand/done").is_dir())
         self.assertFalse((self.root / "srv/agents/inbox/hand/sent").exists())   # not a courier's own inbox
 
+    def test_acl_mask_in_group_bits_is_not_a_change(self):
+        from unittest import mock
+        rec = Recorder(users={"myapp-dev", "myapp-plan", "erik"})
+        d = self.root / "srv/agents/inbox/myapp-plan"
+        d.mkdir(parents=True)
+        os.chmod(d, 0o1770)   # what stat shows for 1730 plus the admin's ACL entry: the mask rwx
+        with mock.patch.object(accounts, "has_acl", lambda p: True):
+            acts = self.apply(load(admin="erik"), rec, dry_run=True)
+        self.assertIn(("kept", "/srv/agents/inbox/myapp-plan (1730, myapp-plan:agents)"), acts)
+        with mock.patch.object(accounts, "has_acl", lambda p: False):
+            acts = self.apply(load(admin="erik"), rec, dry_run=True)
+        self.assertIn(("changed", "/srv/agents/inbox/myapp-plan (1730, myapp-plan:agents)"), acts)   # no ACL: 1770 is wrong
+
 
 if __name__ == "__main__":
     unittest.main()

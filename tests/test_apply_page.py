@@ -235,7 +235,7 @@ class ServeHintTests(unittest.TestCase):
         self.assertIn("  sudo tailscale serve --bg --set-path /fleet/assets/ off   # an older entry under /fleet", lines)   # the slash: as listed
         self.assertIn("  sudo tailscale serve --bg --set-path /fleet/fleet.json off   # an older entry under /fleet", lines)
         self.assertTrue(any(l.startswith("  sudo tailscale serve --bg --set-path /fleet /srv/agents/fleet") for l in lines))
-        self.assertFalse(any("/ off" in l for l in lines))   # the root proxy is not ours
+        self.assertFalse(any("--set-path / off" in l for l in lines))   # the root proxy is not ours (since #26 "/fleet/assets/ off" also holds "/ off")
 
     def test_tailscale_in_place(self):
         status = "https://box.example.ts.net (tailnet only)\n|-- /fleet/ path /srv/agents/fleet\n"
