@@ -97,6 +97,25 @@ class AccountsTests(unittest.TestCase):
         self.assertIn("lap-guard", ua)
         self.assertEqual(next(c for c in rec.calls if c[0] == "useradd" and c[-1] == "lap-guard")[-2], "guard lap-guard (fleet)")
 
+    def test_agent_with_an_account_of_its_own(self):
+        doc = load(admin="erik")
+        doc["agents"] = {"solo": {"machine": "box", "account": "solo"},           # its own: the kit makes it
+                         "notes": {"machine": "box", "account": "erik"},          # a person's login: nothing
+                         "away": {"machine": "laptop", "account": "away"}}        # another machine: nothing here
+        rec = Recorder(users={"erik"})
+        self.apply(doc, rec)
+        ua = {c[-1]: c for c in rec.calls if c[0] == "useradd"}
+        self.assertIn("solo", ua)
+        self.assertEqual(ua["solo"][-2], "agent solo (fleet)")
+        self.assertIn("/srv/solo", ua["solo"])
+        self.assertNotIn("erik", ua)
+        self.assertNotIn("notes", ua)
+        self.assertNotIn("away", ua)
+        self.assertIn(["loginctl", "enable-linger", "solo"], rec.calls)
+        self.assertIn(["usermod", "-aG", "solo", "erik"], rec.calls)
+        self.assertEqual(os.readlink(self.root / "srv/solo/agents"), "/srv/agents")
+        self.assertFalse((self.root / "data/solo").exists())   # no scratch: an agent builds nothing in rounds
+
     def test_dry_run_and_other_machines(self):
         rec = Recorder()
         acts = self.apply(load(), rec, dry_run=True)
