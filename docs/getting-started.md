@@ -40,7 +40,7 @@ Three principles hold it together:
 | labels and the ruleset in each repository | `fleet labels`, `fleet ruleset` (compare, `--apply` writes) |
 | a new project or bot in the file, and the steps that remain by hand | `fleet add-project`, `fleet add-bot` |
 | a daily check of GitHub and the machine against the file | `fleet doctor` |
-| the bots' Unix accounts, homes, scratch directories, the inboxes with their ACLs | `fleet apply accounts`, `fleet apply inbox` (arch family, root; NixOS declares them in its module) |
+| the bots' Unix accounts (and an agent's own, when its `account` is its name), homes, scratch directories, the inboxes with their ACLs | `fleet apply accounts`, `fleet apply inbox` (arch family, root; NixOS declares them in its module) |
 | the round scripts `bot-round`, `bot-review`, the token helper `fleet-token`, the units and timers | `fleet apply rounds` installs the kit's own (`src/fleet_kit/data`, MIT, from haku's fleet) root-owned and enables the timers |
 | the page: the collector, the frame and its looks, the unit and timer | `fleet collect` writes the JSON, `fleet apply page` installs page and timer (step 7), `fleet status` prints the lists in a shell |
 

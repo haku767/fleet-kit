@@ -233,9 +233,9 @@ def check(text, doc):
             err(w, "apps must list the guard's App slug (and a second App per foreign owner)")
         if "project" in g and g["project"] not in (doc.get("projects") or {}):
             err(w, f"project `{g['project']}` is not in [projects]")
-    # [agents.<name>]: a person's own session with an inbox of its own (no rounds, no App, no
-    # account of its own): machine says where it runs, account the login it runs in, the inbox's
-    # owner there. The courier carries its mail like a bot's; elsewhere the courier guard owns it.
+    # [agents.<name>]: a person's own session with an inbox of its own (no rounds, no App): machine
+    # says where it runs, account the login it runs in, the inbox's owner there; an account equal to
+    # the agent's name is a service account of its own, which `apply accounts` makes. The courier carries its mail like a bot's; elsewhere the courier guard owns it.
     agents = tables("agents")
     bot_names = {x.name for x in bots(doc)}
     for aname, a in agents.items():

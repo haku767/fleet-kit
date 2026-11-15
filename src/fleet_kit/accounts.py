@@ -1,7 +1,7 @@
 """`fleet apply accounts` and `fleet apply inbox`: the Unix side of a bots machine (arch family).
 
-accounts: the agents directory and its group; for every bot of this machine and every guard
-whose courier delivers here, a Unix account (`useradd`, home `home_root/<account>` 750, in
+accounts: the agents directory and its group; for every bot of this machine, every guard
+whose courier delivers here and every agent whose `account` is its own name, a Unix account (`useradd`, home `home_root/<account>` 750, in
 the agents group, linger on, `~/agents` a link to the agents directory); for a dev bot its
 scratch directory `scratch_root/<account>` and podman's `storage.conf` pointing its images
 there; the machine's `admin` (an optional `[machines.<m>] admin = "<login>"`) in every bot's
@@ -173,6 +173,14 @@ def courier_guards(doc, machine):
             if (((doc.get("machines") or {}).get(gv.get("machine")) or {}).get("courier") or {}).get("to") == machine]
 
 
+def own_agents(doc, machine):
+    """The agents of this machine with an account of their own: `[agents.<name>] account = "<name>"`
+    names no person's login but a service account like a bot's, so the kit makes it (home 750,
+    linger, `~/agents`; no scratch, no rounds). An agent that runs in a person's login gets
+    nothing here: that login is the person's."""
+    return [a for a, av in (doc.get("agents") or {}).items() if av.get("machine") == machine and av.get("account") == a]
+
+
 def apply_accounts(doc, machine, root="/", dry_run=False, run=None, user_exists=None, group_exists=None, owner_of=None):
     m, out = machine_of(doc, machine)
     if m is None:
@@ -193,12 +201,13 @@ def apply_accounts(doc, machine, root="/", dry_run=False, run=None, user_exists=
     if admin and s.user(admin):
         s.run("usermod", "-aG", GROUP, admin)
     mine = [(kind, b, acct) for pname, p, kind, b, acct, bm in fl.bots() if bm == machine]
-    accounts = [(kind, acct) for kind, b, acct in mine] + [("guard", g) for g in courier_guards(doc, machine)]
+    accounts = [(kind, acct) for kind, b, acct in mine] + [("guard", g) for g in courier_guards(doc, machine)] \
+        + [("agent", a) for a in own_agents(doc, machine)]
     for kind, acct in accounts:
         home, scratch = fl.paths(machine, acct)
         if not s.user(acct):
             s.run("useradd", "--create-home", "--home-dir", home, "--groups", GROUP, "--shell", "/bin/bash",
-                  "--comment", f"{'guard' if kind == 'guard' else 'bot'} {acct} (fleet)", acct)
+                  "--comment", f"{kind if kind in ('guard', 'agent') else 'bot'} {acct} (fleet)", acct)
             out.append(("added", f"account {acct}, home {home}"))
         out.append((s.ensure_dir(home, 0o750, acct, acct), f"{home} (750)"))
         if admin and s.user(admin):
