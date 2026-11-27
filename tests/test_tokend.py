@@ -82,8 +82,10 @@ class FakeApi:
     def __call__(self, method, path, auth, data=None):
         self.calls.append((method, path, data))
         if path == "/app":
+            assert auth.startswith("Bearer "), auth
             return {"slug": "example-fleet-dev"}
         if path.startswith("/users/"):
+            assert auth.startswith("token ghs_"), auth   # the bot user needs an installation token, not the JWT
             return {"id": 777}
         if path == "/app/installations":
             return [{"id": 5, "account": {"login": "Example"}}]
