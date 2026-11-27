@@ -8,6 +8,7 @@ import tempfile
 import threading
 import tomllib
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 DATA = HERE.parent / "src" / "fleet_kit" / "data"
@@ -207,3 +208,16 @@ class ApplyTests(unittest.TestCase):
         fj = json.loads(render.render(doc())["machines/box/fleet.json"])
         self.assertEqual(fj["token_service"]["account"], "fleet")
         self.assertEqual(fj["token_service"]["slugs"], ["example-fleet-dev", "example-fleet-review"])
+
+
+class CredentialHelperTests(unittest.TestCase):
+    def test_app_flag_before_the_operation(self):
+        import contextlib
+        import io
+        ft = load("fleet_token")
+        ft.token = lambda app=None, scope=None: f"tok-{app}"
+        for argv, want in ((["git-credential", "get"], "tok-None"), (["git-credential", "--app", "dev", "get"], "tok-dev")):
+            out = io.StringIO()
+            with mock.patch("sys.stdin", io.StringIO("protocol=https\nhost=github.com\n")), mock.patch("sys.argv", ["fleet-token", *argv]), contextlib.redirect_stdout(out):
+                ft.main()
+            self.assertIn(f"password={want}", out.getvalue())

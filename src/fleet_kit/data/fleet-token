@@ -169,8 +169,12 @@ def main():
     elif len(args) == 3 and args[0] == "setup" and args[1] == "--app" and args[2] and "/" not in args[2]:
         setup(args[2])
     elif args[:1] == ["git-credential"]:
-        app = args[3] if args[1:4][1:2] == ["--app"] and len(args) >= 4 else None
-        if args[1:2] == ["get"]:
+        # git appends the operation: `fleet-token git-credential [--app NAME] get`
+        rest = args[1:]
+        app = None
+        if rest[:1] == ["--app"] and len(rest) >= 2:
+            app, rest = rest[1], rest[2:]
+        if rest == ["get"]:
             req = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l)
             if req.get("host") == "github.com":
                 print(f"username=x-access-token\npassword={token(app)}")
