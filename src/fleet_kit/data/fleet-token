@@ -136,7 +136,9 @@ def setup(app=None):
         slug = api("GET", "/app", f"Bearer {jwt(CONF / app if app else CONF)}")["slug"]
         bot_id = api("GET", f"/users/{slug}%5Bbot%5D", f"token {token(app)}")["id"]
     flag = f" --app {app}" if app else ""
-    git = lambda *a: subprocess.run(["git", "config", "--global", *a], check=True)
+    # from the account's home: `sudo -u <bot> -H` leaves the caller's directory, which the bot
+    # may not read, and git refuses to work from there (2026-11-27)
+    git = lambda *a: subprocess.run(["git", "config", "--global", *a], check=True, cwd=str(Path.home()))
     git("user.name", f"{slug}[bot]")
     git("user.email", f"{bot_id}+{slug}[bot]@users.noreply.github.com")
     subprocess.run(["git", "config", "--global", "--unset-all", "credential.https://github.com.helper"])
@@ -167,8 +169,12 @@ def main():
     elif len(args) == 3 and args[0] == "setup" and args[1] == "--app" and args[2] and "/" not in args[2]:
         setup(args[2])
     elif args[:1] == ["git-credential"]:
-        app = args[3] if args[1:4][1:2] == ["--app"] and len(args) >= 4 else None
-        if args[1:2] == ["get"]:
+        # git appends the operation: `fleet-token git-credential [--app NAME] get`
+        rest = args[1:]
+        app = None
+        if rest[:1] == ["--app"] and len(rest) >= 2:
+            app, rest = rest[1], rest[2:]
+        if rest == ["get"]:
             req = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l)
             if req.get("host") == "github.com":
                 print(f"username=x-access-token\npassword={token(app)}")
