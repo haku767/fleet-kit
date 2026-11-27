@@ -17,7 +17,8 @@ Who gets what (from the file, by the caller's uid):
   a plan bot       its project's repository, the review App, review (pull requests, issues; contents read)
   the reviewer     every reviewed project's repository, the review App, review
   a guard          app "dev": the projects in [guards.<g>] writes, the dev App, write;
-                   else (the default) every repository the review App is installed on, read
+                   else (the default) every repository the review App is installed on, review
+                   rights (comments, issues, labels; contents read); scope "read" for read only
   anyone else      nothing ("not served"; fleet-token falls back to keys of its own)
 A repository under another owner needs [apps.<name>] with that owner; a bot of such a project
 gets that App, a guard gets it with app "<name>" (read).
@@ -133,14 +134,17 @@ class Fleet:
             slug = self.slug_for("review", self.owner)
             return (slug, by_owner.get(self.owner, []), REVIEW) if slug else "no review App in [apps]"
         if kind == "guard":
+            # default: the review App on every repository with review rights (comments, issues,
+            # labels anywhere; contents read); "dev": the dev App, write, on the guard's `writes`
+            # projects; "<name>": a foreign owner's App, review rights there
             if want_app == "dev":
                 names = [self.projects[p].get("repo", "").split("/", 1)[1] for p in writes if p in self.projects]
                 slug = self.slug_for("dev", self.owner)
                 return (slug, names, WRITE) if slug and names else "no dev App, or [guards.<g>] writes is empty"
             if want_app and want_app not in ("review", None) and isinstance(self.apps.get(want_app), dict):
-                return (self.apps[want_app]["slug"], None, READ)
+                return (self.apps[want_app]["slug"], None, REVIEW)
             slug = self.slug_for("review", self.owner)
-            return (slug, None, READ) if slug else "no review App in [apps]"
+            return (slug, None, REVIEW) if slug else "no review App in [apps]"
         return "not served"
 
 

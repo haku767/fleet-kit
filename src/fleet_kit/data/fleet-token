@@ -18,8 +18,8 @@ not serve this account, the keys of the account's own App are used, per bot acco
   fleet-token --app <name>        the same for the second App in ~/.config/fleet/<name>/ (with the
                                   service: that App's token, or "dev" for a guard's write token)
   fleet-token --read              with the service: a read-only token
-  fleet-token setup               git and gh use the App: credential helper, the App as commit author,
-                                  ~/.local/bin/gh that runs gh with the token
+  fleet-token setup [--app NAME]  git and gh use the App: credential helper, the App as commit author,
+                                  ~/.local/bin/gh that runs gh with the token (a guard: --app dev)
   fleet-token git-credential get  git's credential helper (set up by "setup")
 """
 import base64, calendar, json, os, shutil, socket, subprocess, sys, time, urllib.error, urllib.request
@@ -125,19 +125,23 @@ def token(app=None, scope=None):
     return t["token"]
 
 
-def setup():
-    served = from_service()
+def setup(app=None):
+    """git and gh as this account's App: with the service, `setup --app dev` makes a guard write
+    as the dev App (its pushes and pull requests) while the bare `fleet-token` keeps the review
+    App for everything else."""
+    served = from_service(app)
     if served is not None and "token" in served:
         slug, bot_id = served["slug"], served["bot_id"]
     else:
-        slug = api("GET", "/app", f"Bearer {jwt()}")["slug"]
-        bot_id = api("GET", f"/users/{slug}%5Bbot%5D", f"token {token()}")["id"]
+        slug = api("GET", "/app", f"Bearer {jwt(CONF / app if app else CONF)}")["slug"]
+        bot_id = api("GET", f"/users/{slug}%5Bbot%5D", f"token {token(app)}")["id"]
+    flag = f" --app {app}" if app else ""
     git = lambda *a: subprocess.run(["git", "config", "--global", *a], check=True)
     git("user.name", f"{slug}[bot]")
     git("user.email", f"{bot_id}+{slug}[bot]@users.noreply.github.com")
     subprocess.run(["git", "config", "--global", "--unset-all", "credential.https://github.com.helper"])
     git("--add", "credential.https://github.com.helper", "")
-    git("--add", "credential.https://github.com.helper", "!/usr/local/bin/fleet-token git-credential")
+    git("--add", "credential.https://github.com.helper", f"!/usr/local/bin/fleet-token git-credential{flag}")
     gh = Path.home() / ".local/bin/gh"
     gh.parent.mkdir(parents=True, exist_ok=True)
     # the real gh: the first on PATH outside ~/.local/bin (/usr/bin/gh on Arch,
@@ -145,7 +149,7 @@ def setup():
     real = next((w for d in os.get_exec_path() if Path(d) != gh.parent
                  for w in [shutil.which("gh", path=d)] if w), "/usr/bin/gh")
     gh.write_text('#!/bin/sh\n# gh as this bot\'s GitHub App (fleet-token setup)\n'
-                  f'GH_TOKEN=$(/usr/local/bin/fleet-token) || exit 1\nexport GH_TOKEN\nexec {real} "$@"\n')
+                  f'GH_TOKEN=$(/usr/local/bin/fleet-token{flag}) || exit 1\nexport GH_TOKEN\nexec {real} "$@"\n')
     gh.chmod(0o755)
     print(f"git and gh act as {slug}[bot] now. ~/.local/bin must come before /usr/bin in PATH.")
 
@@ -160,11 +164,14 @@ def main():
         print(token(args[1]))
     elif args == ["setup"]:
         setup()
+    elif len(args) == 3 and args[0] == "setup" and args[1] == "--app" and args[2] and "/" not in args[2]:
+        setup(args[2])
     elif args[:1] == ["git-credential"]:
-        if args[1:] == ["get"]:
+        app = args[3] if args[1:4][1:2] == ["--app"] and len(args) >= 4 else None
+        if args[1:2] == ["get"]:
             req = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l)
             if req.get("host") == "github.com":
-                print(f"username=x-access-token\npassword={token()}")
+                print(f"username=x-access-token\npassword={token(app)}")
     else:
         sys.exit(__doc__)
 
