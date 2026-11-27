@@ -55,7 +55,7 @@ class GrantTests(unittest.TestCase):
 
     def test_guard_reads_everything_and_writes_where_listed(self):
         slug, repos, perms = self.fleet.grant(1300)
-        self.assertEqual((slug, repos, perms), ("example-fleet-review", None, self.td.READ))
+        self.assertEqual((slug, repos, perms), ("example-fleet-review", None, self.td.REVIEW))
         slug, repos, perms = self.fleet.grant(1300, "dev")
         self.assertEqual((slug, repos), ("example-fleet-dev", ["notes"]))
         self.assertEqual(perms, self.td.WRITE)
