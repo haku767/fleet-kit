@@ -210,12 +210,15 @@ def apply(doc, machine, root="/", dry_run=False, systemctl=None, start=False):
         st = t.unit_state(unit)
         enabled = st.get("UnitFileState") == "enabled"
         active = st.get("ActiveState") == "active"
-        if p.get("paused"):
+        # a paused project's timers are off; so are a plan bot's own review rounds once the fleet
+        # has a reviewer (the plan bot plans in sessions, the reviewer reviews)
+        why = "the project is paused" if p.get("paused") else "the fleet's reviewer reviews" if kind == "plan" and rv else None
+        if why:
             if enabled or active:
                 t.systemctl("disable", "--now", unit)
-                out.append(("disabled", f"{unit} (the project is paused)"))
+                out.append(("disabled", f"{unit} ({why})"))
             else:
-                out.append(("kept", f"{unit} off, the project is paused"))
+                out.append(("kept", f"{unit} off, {why}"))
             continue
         if not enabled:
             t.systemctl("enable", unit)
