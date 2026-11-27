@@ -1,0 +1,34 @@
+[Unit]
+Description=the fleet's token service: GitHub App tokens for the bots, scoped per project (fleet-kit)
+Documentation=https://github.com/haku767/fleet-kit
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/fleet/fleet.toml
+
+[Service]
+Type=simple
+User=fleet
+Group=agents
+ExecStart=/usr/local/bin/fleet-tokend --file /etc/fleet/fleet.toml --socket /run/fleet/token.sock --keys /var/lib/fleet/apps
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=fleet
+RuntimeDirectoryMode=0750
+StateDirectory=fleet
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -351,6 +351,9 @@ def machine_json(fl, mname):
            "foreign_apps": {k: v for k, v in fl.apps.items() if isinstance(v, dict)},
            "reviewer": fl.reviewer.account if fl.reviewer and fl.reviewer.machine == mname else None,
            "reviewed": [pn for pn, _ in fl.reviewed()] if fl.reviewer and fl.reviewer.machine == mname else [],
+           "token_service": ({"account": "fleet", "socket": "/run/fleet/token.sock", "keys": "/var/lib/fleet/apps",
+                              "slugs": sorted({v if isinstance(v, str) else v.get("slug", "") for v in fl.apps.values()})}
+                             if fl.apps and m.get("role") == "bots" else None),
            "accounts": accounts, "timers": timers, "courier": courier,
            "courier_lists": lists_.get(f"machines/{mname}/courier.sh")}
     return json.dumps(doc, indent=1) + "\n"
