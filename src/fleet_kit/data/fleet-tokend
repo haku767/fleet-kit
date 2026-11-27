@@ -156,10 +156,12 @@ class Minter:
         self.apps = {}
         self.lock = threading.Lock()
 
-    def app(self, slug):
+    def app(self, slug, token):
+        """(the App's slug as GitHub spells it, its bot user's id): /app with the App's JWT, the
+        user with an installation token (a JWT is refused there, 2026-11-27)."""
         if slug not in self.apps:
             a = self.api("GET", "/app", f"Bearer {jwt(self.keys, slug)}")
-            bot = self.api("GET", f"/users/{a['slug']}%5Bbot%5D", f"Bearer {jwt(self.keys, slug)}")
+            bot = self.api("GET", f"/users/{a['slug']}%5Bbot%5D", f"token {token}")
             self.apps[slug] = (a["slug"], bot["id"])
         return self.apps[slug]
 
@@ -185,7 +187,7 @@ class Minter:
             t = self.api("POST", f"/app/installations/{self.installation(slug, owner)}/access_tokens",
                          f"Bearer {jwt(self.keys, slug)}", json.dumps(body).encode())
             until = calendar.timegm(time.strptime(t["expires_at"], "%Y-%m-%dT%H:%M:%SZ"))
-            app_slug, bot_id = self.app(slug)
+            app_slug, bot_id = self.app(slug, t["token"])
             c = {"token": t["token"], "until": until, "slug": app_slug, "bot_id": bot_id}
             self.cache[key] = c
             return c
