@@ -149,6 +149,11 @@ class ReviewerRoundsTests(unittest.TestCase):
             acts = accounts.apply_accounts(doc, "box", root=d, run=run, user_exists=lambda u: False, group_exists=lambda g: True)
         self.assertTrue(any("account fleet-review" in w for _, w in acts), acts)
         self.assertTrue(any(c[0] == "useradd" and c[-1] == "fleet-review" for c in calls), calls)
+        add = next(c for c in calls if c[0] == "useradd" and c[-1] == "fleet-review")
+        self.assertIn("--uid", add)
+        self.assertEqual(add[add.index("--uid") + 1], "1200")   # the uid the file pins
+        add = next(c for c in calls if c[0] == "useradd" and c[-1] == "myapp-dev")
+        self.assertEqual(add[add.index("--uid") + 1], "1201")
         self.assertEqual(accounts.inbox_owner(doc, render.Fleet(doc), "fleet-review", "box", {"fleet-review"}), "fleet-review")
 
 
