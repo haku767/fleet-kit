@@ -1,0 +1,40 @@
+# A fleet with the small forms: a project of kind "session" (the owner's own session, no bots,
+# an inbox through [agents]), one of kind "solo" (a dev bot; the fleet's reviewer reviews its
+# pull requests), and the two Apps every bot shares. Facts only, never a key or a token.
+
+[fleet]
+name = "erik"
+owner = "example"
+reviewer = { name = "fleet-review", machine = "box", persona = "Mira", uid = 1200 }
+
+[apps]
+dev = "example-fleet-dev"            # writes: branches, pull requests (the dev bots)
+review = "example-fleet-review"      # plans, comments, approves (the reviewer, plan bots)
+
+[machines.box]
+role = "bots"
+family = "nixos"                     # the machine reads machines/box/fleet.json from `fleet render`
+home_root = "/srv"
+scratch_root = "/data"
+admin = "erik"
+
+[stacks.python-uv]
+test = "uv sync; uv run ruff check; uv run pytest"
+allow = ["uv sync*", "uv lock*", "uv run ruff *", "uv run pytest*"]
+env = { UV_CACHE_DIR = "{scratch}/uv-cache", UV_LINK_MODE = "copy" }
+
+[projects.notes]                     # the owner's own session: the page shows it, nothing runs
+repo = "example/notes"
+kind = "session"
+
+[projects.myapp]                     # one dev bot in rounds; fleet-review reviews
+repo = "example/myapp"
+kind = "solo"
+stacks = ["python-uv"]
+ci = "no"
+reviews = 1
+dev = { name = "myapp-dev", uid = 1201 }
+
+[agents.notes]                       # the session's inbox on the machine, in the owner's login
+machine = "box"
+account = "erik"

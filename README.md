@@ -17,14 +17,27 @@ is a machine's own (ssh keys, sudoers, deploy wrappers) and the page (haku's fle
 ## The file
 
 `fleet.toml` holds every fact about the fleet once: the owner, the machines, the stacks (test
-command, allow list, environment), the projects with their two bots, the guards, the
+command, allow list, environment), the projects with their bots, the guards, the
 people who may set `ready`, and the agents: a person's own sessions that want an inbox of
 their own (`[agents.<name>]` with `machine` and `account`; no rounds, no App, the courier
 carries their mail like a bot's; an `account` equal to the agent's name is a service account of
 its own, which `apply accounts` makes). Never a secret: App keys, runner tokens and the Claude logins
 stay on the machine. [`examples/minimal.toml`](examples/minimal.toml) is the smallest fleet,
-one machine, one project, two bots; haku's own file, two machines and seven projects, is in
-haku767/fleet.
+one machine, one project, two bots; [`examples/solo.toml`](examples/solo.toml) the small forms
+below; haku's own file, two machines and seven projects, is in haku767/fleet.
+
+A project has a **kind**: `session` (the owner's own session, no bots; an `[agents.<name>]`
+gives it an inbox), `solo` (one dev bot in rounds) or `pair` (a plan bot too, for a project
+with users and testers: it plans in sessions, writes issues, sets `ready`). Without `kind` the
+bots present say which it is. One **reviewer** per fleet (`[fleet] reviewer = { name, account,
+machine, uid }`) reviews every project's pull requests in rounds, one timer per project
+(`bot-review-for@<project>`); a fleet without one keeps the plan bots' own review rounds. Two
+**Apps** per fleet (`[apps] dev`, `review`; installed on all of the owner's repositories) serve
+every bot, so a new project needs no App: dev bots write with the first, plan bots and the
+reviewer comment and approve with the second (GitHub lets no author approve its own pull
+request). A bot's own `app` still wins. `uid` on a bot, guard, agent or the reviewer pins its
+Unix uid, and `machines/<m>/fleet.json` from `fleet render` hands a machine whose
+configuration is code (`family = "nixos"`) its accounts, timers and lists as data.
 
 ## The command
 
@@ -36,7 +49,7 @@ haku767/fleet.
 | `fleet apply lists [--machine M] [--dir D] [--dry-run] [fleet.toml]` | works | writes this host's `machines/<host>/lists.sh` as `/etc/fleet/lists.sh` (a bots machine: the install scripts' account lists) and `courier.sh` as `/etc/fleet/courier.sh` (a machine with a courier), sudo, same rules as `apply conf`; the host is `uname -n` unless `--machine` says otherwise |
 | `fleet labels <project>\|all [--apply] [-v] [fleet.toml]` | works | compares a project's repository with the fleet's labels (`[labels]` in the file, or the kit's defaults: `ready`, `needs-haku`, `next`, `live`, `size:S/M/L`, one `bot:<name>` per bot; `{owner}`, `{plan}`, `{dev}` in a description are filled in per project) and lists what to create or change; `--apply` writes it through `gh api` as whoever runs it (write access to the repository). Other labels are left alone, nothing is deleted |
 | `fleet ruleset <project>\|all [--apply] [fleet.toml]` | works | a project with `reviews = N` wants the ruleset `main-rule` on its default branch: no deletion, no force push, a pull request with N approving reviews; the command shows the differences, `--apply` creates or updates it (admin rights: the owner, not a bot). Without `reviews` it only reports what the repository has |
-| `fleet add-project <name> --repo O/R --stack S [--test CMD] [--ci ...] [--reviews N] [--plan NAME] [--dev NAME] [--no-plan] [--no-dev] [--machine M] [--paused] [fleet.toml]` | works | appends `[projects.<name>]` with its plan and dev bot (default `<name>-plan`, `<name>-dev`) before the guards, checks the result and writes only when it is clean; then prints what is still by hand: the Apps with their permissions and installation, labels, ruleset, the accounts and keys on the machine, the first round |
+| `fleet add-project <name> --repo O/R [--kind session\|solo\|pair] --stack S [--test CMD] [--ci ...] [--reviews N] [--plan NAME] [--dev NAME] [--no-plan] [--no-dev] [--machine M] [--paused] [fleet.toml]` | works | appends `[projects.<name>]` with its plan and dev bot (default `<name>-plan`, `<name>-dev`) before the guards, checks the result and writes only when it is clean; then prints what is still by hand: the Apps with their permissions and installation, labels, ruleset, the accounts and keys on the machine, the first round |
 | `fleet add-bot <project> plan\|dev [--name N] [--account A] [--persona P] [--machine M] [fleet.toml]` | works | adds the one bot line to the project's block, same check and the same steps for that bot |
 | `fleet doctor [project\|all] [-v] [--machine M] [fleet.toml]` | works | one line per check, `ok`/`warn`/`fail`/`skip`, exit 1 on a fail: the repository reachable, labels and ruleset as the file says, each bot's App with the permissions it needs (checks and actions read only where `ci` is not `no`), installed on the repository and its `reads` (seen only by the owner's login), every open `ready` set by someone trusted, the runner online, the guards' Apps. Then the machine half for this host (or `--machine`), when it is a bots machine in the file: each bot's account (home 750, linger, `~/agents`), its scratch directory, its `/etc/fleet/bots/<account>.conf` (root's, current), `claude` and the App's key in its home (root sees them, a bot gets `skip`), its timer on (off for a paused project), its status file fresh and signed in, every inbox in place and not stale, `/etc/fleet/lists.sh`, the scripts and units, the agents directory, the guard's report, the house rules. Without `gh` the GitHub half is skipped, the machine half still runs |
 | `fleet apply rounds [--machine M] [--start] [--dir ROOT] [--dry-run] [fleet.toml]` | works | the headless rounds on a bots machine (arch family; sudo): installs the kit's `bot-round`, `bot-review` and `fleet-token` to `/usr/local/bin` and the four template units to `/etc/systemd/system`, root-owned, makes `agents_dir/status` and each bot's `work/` or `review/` and `log/`, `daemon-reload`, enables the timers of the machine's bots and disables a paused project's; starts nothing unless `--start` (the first round by hand first). NixOS: nothing, its module takes the rendered files |

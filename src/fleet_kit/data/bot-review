@@ -3,6 +3,7 @@
 # PLANS 7, stage 4, 2026-10-11; in the kit since PLANS 13 stage 4). Runs as the plan
 # bot, from bot-review@<bot>.timer (`fleet apply rounds` installs script and units, root-owned):
 #   bot-review              one round: review the next open pull request of the project's dev bot
+#   bot-review --project <p> the same as the fleet's reviewer for project <p> (conf <account>.<p>.conf)
 #   bot-review status       which pull requests the rounds reviewed, how often, with what verdict
 #   bot-review drop <pr>    forget pull request <pr>: the next round may review it again
 #   bot-review get <path>   GET on the GitHub API below repos/<repo>/ (what a review may read)
@@ -44,11 +45,21 @@ conf_ok() {   # conf_ok <file>: root's, not writable by group or others, same fo
     case $(stat -c %A "$f") in ?????w*|????????w*) return 1 ;; esac
   done
 }
-conf=/etc/fleet/bots/$me.conf
-[ -f "$conf" ] || { echo "bot-review: no $conf: this account is not a plan bot in fleet.toml, or fleet apply conf has not run" >&2; exit 2; }
+# `bot-review --project <p>`: the fleet's reviewer, one account for every project; its conf is
+# /etc/fleet/bots/<account>.<project>.conf (kind=review) and its state lives under review/<project>/
+for_project=
+case ${1:-} in
+--project)
+  [ -n "${2:-}" ] || { echo "bot-review --project <project>" >&2; exit 2; }
+  case $2 in *[!A-Za-z0-9_-]*) echo "bot-review: --project takes a project name" >&2; exit 2 ;; esac
+  for_project=$2; shift 2 ;;
+esac
+conf=/etc/fleet/bots/$me${for_project:+.$for_project}.conf
+[ -f "$conf" ] || { echo "bot-review: no $conf: this account is not a plan bot or the reviewer in fleet.toml, or fleet apply conf has not run" >&2; exit 2; }
 conf_ok "$conf" || { echo "bot-review: $conf is not root's or is writable by others, not sourcing it" >&2; exit 2; }
 . "$conf"
-[ "${kind:-}" = plan ] || { echo "bot-review: $conf is not a plan bot's (kind=${kind:-})" >&2; exit 2; }
+case ${kind:-} in plan|review) ;; *) echo "bot-review: $conf is not a plan bot's or the reviewer's (kind=${kind:-})" >&2; exit 2 ;; esac
+[ "${kind:-}" = review ] && [ -z "$for_project" ] && { echo "bot-review: the reviewer runs with --project <project>" >&2; exit 2; }
 # the fleet's values from the .conf, the environment (/etc/default/bot-review) over them, and the
 # values haku's fleet ran with as the last word, as in bot-round
 owner=${owner:-haku767}
@@ -64,7 +75,7 @@ export HOME USER=$me LOGNAME=$me
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin"
 unset WAYLAND_DISPLAY DISPLAY SSH_AUTH_SOCK
 # the notes go to this machine's guard, as in bot-round; no guard, no notes
-rev=$HOME/review log=$HOME/log inbox=${guard:+$agents_dir/inbox/$guard} src=$HOME/review/src
+rev=$HOME/review${for_project:+/$for_project} log=$HOME/log inbox=${guard:+$agents_dir/inbox/$guard} src=$rev/src
 mkdir -p "$rev" "$log"
 export GH_TOKEN; GH_TOKEN=$(fleet-token)
 if [ "$ci" = auto ]; then
@@ -108,8 +119,8 @@ status_write() {
      --arg outcome "$outcome" --arg what "$what" --argjson cost "$cost" --argjson turns "$turns" \
      --argjson signed_in "$signed_in" --arg log "$logfile" --argjson inbox "${inbox_n:-0}" \
      '{bot:$bot,kind:$kind,started:$started,ended:$ended,outcome:$outcome,what:$what,cost_usd:$cost,turns:$turns,signed_in:$signed_in,inbox:$inbox,log:$log}' \
-     > "$status_dir/$name-review.json.tmp" 2>/dev/null && mv -f "$status_dir/$name-review.json.tmp" "$status_dir/$name-review.json" || true
-  [ "$outcome" = running ] || printf '%s %s %s %s %s\n' "$started" "$outcome" "$cost" "$turns" "$what" >> "$status_dir/$name-review.log" 2>/dev/null || true
+     > "$status_dir/$name${for_project:+-$for_project}-review.json.tmp" 2>/dev/null && mv -f "$status_dir/$name${for_project:+-$for_project}-review.json.tmp" "$status_dir/$name${for_project:+-$for_project}-review.json" || true
+  [ "$outcome" = running ] || printf '%s %s %s %s %s\n' "$started" "$outcome" "$cost" "$turns" "$what" >> "$status_dir/$name${for_project:+-$for_project}-review.log" 2>/dev/null || true
 }
 status_write; trap status_write EXIT
 say "review round as $name ($me) in $repo"

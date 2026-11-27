@@ -84,6 +84,22 @@ def insert_bot(text, pname, kind, spec):
     return "".join(lines[:last]) + line + "".join(lines[last:])
 
 
+def set_kind(text, pname, kind):
+    """The text with `kind = "<kind>"` in [projects.<pname>]: an existing kind line replaced,
+    else the line added right after the table header."""
+    lines, spans = table_spans(text)
+    span = next(((i, end) for name, i, end in spans if name == f"projects.{pname}"), None)
+    if span is None:
+        raise KeyError(pname)
+    i, end = span
+    line = f"kind = {toml_value(kind)}\n"
+    for n in range(i + 1, end):
+        if re.match(r"\s*kind\s*=", lines[n]):
+            lines[n] = line
+            return "".join(lines)
+    return "".join(lines[:i + 1]) + line + "".join(lines[i + 1:])
+
+
 def write_checked(path, text, cmd):
     """Checks the text as the file; writes it atomically when clean. Returns the findings."""
     import tomllib

@@ -1,6 +1,6 @@
 """`fleet apply accounts` and `fleet apply inbox`: the Unix side of a bots machine (arch family).
 
-accounts: the agents directory and its group; for every bot of this machine, every guard
+accounts: the agents directory and its group; for every bot of this machine (the fleet's reviewer too), every guard
 whose courier delivers here and every agent whose `account` is its own name, a Unix account (`useradd`, home `home_root/<account>` 750, in
 the agents group, linger on, `~/agents` a link to the agents directory); for a dev bot its
 scratch directory `scratch_root/<account>` and podman's `storage.conf` pointing its images
@@ -203,11 +203,13 @@ def apply_accounts(doc, machine, root="/", dry_run=False, run=None, user_exists=
     mine = [(kind, b, acct) for pname, p, kind, b, acct, bm in fl.bots() if bm == machine]
     accounts = [(kind, acct) for kind, b, acct in mine] + [("guard", g) for g in courier_guards(doc, machine)] \
         + [("agent", a) for a in own_agents(doc, machine)]
+    if fl.reviewer and fl.reviewer.machine == machine:   # the fleet's reviewer: an account like a plan bot's
+        accounts.append(("review", fl.reviewer.account))
     for kind, acct in accounts:
         home, scratch = fl.paths(machine, acct)
         if not s.user(acct):
             s.run("useradd", "--create-home", "--home-dir", home, "--groups", GROUP, "--shell", "/bin/bash",
-                  "--comment", f"{kind if kind in ('guard', 'agent') else 'bot'} {acct} (fleet)", acct)
+                  "--comment", f"{kind if kind in ('guard', 'agent') else 'reviewer' if kind == 'review' else 'bot'} {acct} (fleet)", acct)
             out.append(("added", f"account {acct}, home {home}"))
         out.append((s.ensure_dir(home, 0o750, acct, acct), f"{home} (750)"))
         if admin and s.user(admin):
@@ -241,6 +243,12 @@ def inbox_owner(doc, fl, name, machine, here_accounts):
                 return acct
             g = (machines.get(bm) or {}).get("guard")
             return g if g in here_accounts else None
+    r = fl.reviewer
+    if r and r.name == name:
+        if r.machine == machine:
+            return r.account
+        g = (machines.get(r.machine) or {}).get("guard")
+        return g if g in here_accounts else None
     g = (doc.get("guards") or {}).get(name)
     if g:
         if g.get("machine") == machine:
@@ -268,7 +276,10 @@ def apply_inbox(doc, machine, root="/", dry_run=False, run=None, user_exists=Non
     out.append((s.ensure_dir(inbox, 0o755, "root", "root", fix_owner=False), inbox))
     couriers = courier_guards(doc, machine)
     here = {acct for *_, acct, bm in fl.bots() if bm == machine} | set(couriers) | {g for g, gv in (doc.get("guards") or {}).items() if gv.get("machine") == machine}
-    names = [b["name"] for *_, b, _a, _m in fl.bots()] + sorted(doc.get("guards") or {}) + sorted(fl.agents)
+    if fl.reviewer and fl.reviewer.machine == machine:
+        here.add(fl.reviewer.account)
+    names = [b["name"] for *_, b, _a, _m in fl.bots()] + ([fl.reviewer.name] if fl.reviewer else []) \
+        + sorted(doc.get("guards") or {}) + sorted(fl.agents)
     for name in names:
         owner = inbox_owner(doc, fl, name, machine, here)
         if owner is None or not s.user(owner):
