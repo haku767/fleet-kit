@@ -365,20 +365,28 @@ def cmd_add_project(args):
     if not model.ACCOUNT.match(name):
         print("fleet add-project: the name must be lowercase letters, digits, - or _ (it names the bots' accounts)", file=sys.stderr)
         return 1
-    if not args.stack and not args.test:
-        print("fleet add-project: --stack <stack> (from [stacks]) or --test <command> is required", file=sys.stderr)
+    if args.kind not in (None, *model.KINDS):
+        print(f"fleet add-project: --kind must be one of {', '.join(model.KINDS)}", file=sys.stderr)
+        return 1
+    if not args.stack and not args.test and args.kind != "session":
+        print("fleet add-project: --stack <stack> (from [stacks]) or --test <command> is required (not for --kind session)", file=sys.stderr)
         return 1
     machine = default_machine(doc, args.machine)
-    if machine is None and (not args.no_plan or not args.no_dev):
+    if machine is None and args.kind != "session" and (not args.no_plan or not args.no_dev):
         print("fleet add-project: several machines have role bots; --machine names one", file=sys.stderr)
         return 1
-    fields = {"repo": args.repo, "stacks": args.stack or None, "test": args.test, "ci": args.ci,
+    # --kind: session (no bots), solo (a dev bot), pair (a plan bot and a dev bot, the default);
+    # --no-plan / --no-dev are the older spelling of the same
+    kind = args.kind or ("session" if args.no_plan and args.no_dev else "solo" if args.no_plan else "pair")
+    want_plan = kind == "pair" and not args.no_plan
+    want_dev = kind != "session" and not args.no_dev
+    fields = {"repo": args.repo, "kind": args.kind, "stacks": args.stack or None, "test": args.test, "ci": args.ci,
               "reviews": args.reviews, "machine": args.machine, "paused": True if args.paused else None}
     kinds = []
-    if not args.no_plan:
+    if want_plan:
         fields["plan"] = {"name": args.plan or f"{name}-plan"}
         kinds.append("plan")
-    if not args.no_dev:
+    if want_dev:
         fields["dev"] = {"name": args.dev or f"{name}-dev"}
         kinds.append("dev")
     block = edit.project_block(name, fields)
@@ -408,8 +416,12 @@ def cmd_add_bot(args):
         if getattr(args, k):
             spec[k] = getattr(args, k)
     what = f"added {args.kind} = {edit.toml_value(spec)} to [projects.{args.project}]"
-    return finish_edit(args, edit.insert_bot(text, args.project, args.kind, spec), doc, "add-bot", what,
-                       args.project, [args.kind], machine)
+    new_text = edit.insert_bot(text, args.project, args.kind, spec)
+    if isinstance(p.get("kind"), str):   # the project's written kind follows its bots: solo + plan = pair, session + dev = solo
+        after = dict(p, **{args.kind: spec})
+        after.pop("kind", None)
+        new_text = edit.set_kind(new_text, args.project, model.kind_of(after))
+    return finish_edit(args, new_text, doc, "add-bot", what, args.project, [args.kind], machine)
 
 
 def cmd_doctor(args):
@@ -520,6 +532,7 @@ def main(argv=None):
     ap_.add_argument("--reviews", type=int, help="approving reviews the default branch's ruleset asks for (fleet ruleset)")
     ap_.add_argument("--plan", metavar="NAME", help="the plan bot's name")
     ap_.add_argument("--dev", metavar="NAME", help="the dev bot's name")
+    ap_.add_argument("--kind", choices=list(model.KINDS), help="session (no bots), solo (a dev bot, the fleet's reviewer reviews), pair (plan and dev bot; the default)")
     ap_.add_argument("--no-plan", action="store_true", help="no plan bot")
     ap_.add_argument("--no-dev", action="store_true", help="no dev bot")
     ap_.add_argument("--machine", help="the bots' machine when several have role bots")

@@ -9,6 +9,7 @@ import tomllib
 from dataclasses import dataclass
 
 FAMILIES = ("arch", "nixos")
+KINDS = ("session", "solo", "pair")   # a project's shape: no bots, a dev bot, a plan bot and a dev bot
 ROLES = ("bots", "guard")
 CI = ("yes", "no", "auto")
 PEOPLE_ROLES = ("owner", "member", "tester")
@@ -29,7 +30,10 @@ SECRET = re.compile(
 )
 
 KEYS = {
-    "fleet": {"name", "owner", "agents_dir", "trailers", "rules"},
+    "fleet": {"name", "owner", "agents_dir", "trailers", "rules", "reviewer"},
+    "reviewer": {"name", "account", "machine", "persona", "budget_usd", "uid"},
+    "apps": {"dev", "review"},           # plus [apps.<name>] for a repository under another owner
+    "app": {"owner", "slug"},
     "defaults.round": {"every", "max_worktrees", "max_turns", "budget_usd", "model_small", "model_large"},
     "defaults.review": {"every", "max_per_pr", "max_turns", "budget_usd", "model_small", "model_large"},
     "page": {"set", "sets", "collect_every", "labels"},   # plus one table per set, [page.<set>], its knobs
@@ -38,10 +42,10 @@ KEYS = {
     "stack": {"test", "allow", "env", "note"},
     "project": {"repo", "stacks", "test", "test_extra", "test_note", "ci", "ci_note", "ci_checks", "review_note",
                 "allow_extra", "env", "runner", "reads", "deploy", "paused", "owner_app", "ready_also", "plan", "dev", "machine",
-                "reviews"},
-    "bot": {"name", "account", "app", "persona", "budget_usd", "machine"},
-    "guard": {"machine", "project", "persona", "apps"},
-    "agent": {"machine", "account", "persona"},
+                "reviews", "kind"},
+    "bot": {"name", "account", "app", "persona", "budget_usd", "machine", "uid"},
+    "guard": {"machine", "project", "persona", "apps", "uid"},
+    "agent": {"machine", "account", "persona", "uid"},
     "person": {"role", "projects"},
     "label": {"color", "description"},
 }
@@ -60,11 +64,29 @@ class Finding:
 @dataclass
 class Bot:
     name: str
-    kind: str          # plan | dev
+    kind: str          # plan | dev | review (the fleet's reviewer, project "*")
     project: str
     account: str
     machine: str | None
     persona: str | None
+
+
+def kind_of(p):
+    """A project's kind: the `kind` key, else what its bots say (plan and dev: pair; dev only:
+    solo; no bots: session)."""
+    if isinstance(p.get("kind"), str):
+        return p["kind"]
+    has_plan = isinstance(p.get("plan"), dict)
+    has_dev = isinstance(p.get("dev"), dict)
+    return "pair" if has_plan and has_dev else "solo" if has_dev else "session"
+
+
+def reviewer(doc):
+    """The fleet's reviewer as a Bot (kind "review", project "*"), or None."""
+    r = ((doc.get("fleet") or {}).get("reviewer"))
+    if not isinstance(r, dict) or not isinstance(r.get("name"), str):
+        return None
+    return Bot(r["name"], "review", "*", r.get("account") or r["name"], r.get("machine"), r.get("persona"))
 
 
 def load(path):
@@ -222,6 +244,39 @@ def check(text, doc):
         if "env" in s and not (isinstance(s["env"], dict) and all(isinstance(v, str) for v in s["env"].values())):
             err(w, "env must be a table of strings")
 
+    # [apps]: the fleet's two Apps (dev writes, review plans, comments and approves) and, as
+    # [apps.<name>], one per repository owner that is not the fleet's owner
+    apps = doc.get("apps")
+    if apps is not None:
+        if not isinstance(apps, dict):
+            err("apps", "must be a table: dev = \"<slug>\", review = \"<slug>\", [apps.<name>] owner and slug")
+            apps = {}
+        keys("apps", {k: v for k, v in apps.items() if not isinstance(v, dict)}, KEYS["apps"])
+        for k in ("dev", "review"):
+            if k in apps and (not isinstance(apps[k], str) or not LOGIN.match(apps[k])):
+                err(f"apps.{k}", "must be the App's slug")
+        for aname, a in apps.items():
+            if isinstance(a, dict):
+                keys(f"apps.{aname}", a, KEYS["app"])
+                if not isinstance(a.get("owner"), str) or not LOGIN.match(a["owner"]):
+                    err(f"apps.{aname}", "owner must be a GitHub login")
+                if not isinstance(a.get("slug"), str) or not LOGIN.match(a["slug"]):
+                    err(f"apps.{aname}", "slug must be the App's slug")
+    # [fleet] reviewer: one account that reviews every project's pull requests
+    rv = fleet.get("reviewer")
+    if rv is not None:
+        if not isinstance(rv, dict) or not isinstance(rv.get("name"), str) or not ACCOUNT.match(rv["name"]):
+            err("fleet.reviewer", "must be a table with at least name (a Unix account name)")
+            rv = None
+        else:
+            keys("fleet.reviewer", rv, KEYS["reviewer"])
+            if "account" in rv and (not isinstance(rv["account"], str) or not ACCOUNT.match(rv["account"])):
+                err("fleet.reviewer", "account must be a Unix account name")
+            if rv.get("machine") not in (doc.get("machines") or {}):
+                err("fleet.reviewer", "machine must name a machine with role bots")
+            if "uid" in rv and (isinstance(rv["uid"], bool) or not isinstance(rv["uid"], int) or rv["uid"] < 1000):
+                err("fleet.reviewer", "uid must be a whole number from 1000")
+
     guards = tables("guards")
     guard_names = set(guards)
     for gname, g in guards.items():
@@ -233,6 +288,8 @@ def check(text, doc):
             err(w, "apps must list the guard's App slug (and a second App per foreign owner)")
         if "project" in g and g["project"] not in (doc.get("projects") or {}):
             err(w, f"project `{g['project']}` is not in [projects]")
+        if "uid" in g and (isinstance(g["uid"], bool) or not isinstance(g["uid"], int) or g["uid"] < 1000):
+            err(w, "uid must be a whole number from 1000")
     # [agents.<name>]: a person's own session with an inbox of its own (no rounds, no App): machine
     # says where it runs, account the login it runs in, the inbox's owner there; an account equal to
     # the agent's name is a service account of its own, which `apply accounts` makes. The courier carries its mail like a bot's; elsewhere the courier guard owns it.
@@ -247,6 +304,8 @@ def check(text, doc):
             err(w, "account must name the login the session runs in (the inbox's owner there)")
         if aname in bot_names or aname in guard_names:
             err(w, "the name is a bot's or a guard's already")
+        if "uid" in a and (isinstance(a["uid"], bool) or not isinstance(a["uid"], int) or a["uid"] < 1000):
+            err(w, "uid must be a whole number from 1000")
     for mname, m in machines.items():
         if "guard" in m and m["guard"] not in guard_names:
             err(f"machines.{mname}", f"guard `{m['guard']}` is not in [guards]")
@@ -280,6 +339,16 @@ def check(text, doc):
         if "machine" in p and p["machine"] not in machines:
             err(w, f"machine `{p['machine']}` is not in [machines]")
         has_bots = any(isinstance(p.get(k), dict) for k in ("plan", "dev"))
+        kind = p.get("kind")
+        if kind is not None:
+            if kind not in KINDS:
+                err(w, f"kind must be one of {', '.join(KINDS)}")
+            elif kind == "session" and has_bots:
+                err(w, "kind session has no bots: drop plan and dev, or choose solo or pair")
+            elif kind == "solo" and (not isinstance(p.get("dev"), dict) or isinstance(p.get("plan"), dict)):
+                err(w, "kind solo has a dev bot and no plan bot")
+            elif kind == "pair" and not (isinstance(p.get("plan"), dict) and isinstance(p.get("dev"), dict)):
+                err(w, "kind pair has a plan bot and a dev bot")
         if has_bots:
             if not p.get("stacks") and not p.get("test"):
                 err(w, "a project with bots needs stacks (or its own test line)")
@@ -288,8 +357,10 @@ def check(text, doc):
                         f"and the project `owner_app` to read it")
             if p.get("owner_app") and repo and repo.split("/")[0] not in foreign_apps:
                 warn(w, f"owner_app is set but no guard lists an App for owner {repo.split('/')[0]}")
-            if not (isinstance(p.get("plan"), dict) and isinstance(p.get("dev"), dict)):
+            if kind_of(p) == "pair" and not (isinstance(p.get("plan"), dict) and isinstance(p.get("dev"), dict)):
                 warn(w, "a project usually has both a plan bot and a dev bot")
+            if isinstance(p.get("dev"), dict) and not isinstance(p.get("plan"), dict) and rv is None:
+                warn(w, "a dev bot without a plan bot: nobody reviews its pull requests unless [fleet] names a reviewer")
             if not bots_machines:
                 err(w, "a project with bots needs a machine with role = \"bots\"")
         for kind in ("plan", "dev"):
@@ -307,10 +378,27 @@ def check(text, doc):
                 err(bw, "account must be a Unix account name")
             if "machine" in b and b["machine"] not in machines:
                 err(bw, f"machine `{b['machine']}` is not in [machines]")
+            if "uid" in b and (isinstance(b["uid"], bool) or not isinstance(b["uid"], int) or b["uid"] < 1000):
+                err(bw, "uid must be a whole number from 1000")
             if b.get("machine") is None and p.get("machine") is None and len(bots_machines) > 1:
                 err(bw, f"several machines have role bots ({', '.join(bots_machines)}); say which one")
 
     seen_names, seen_accounts = {}, {}
+    r = reviewer(doc)
+    if r is not None:
+        if r.name in guard_names or r.name in (doc.get("agents") or {}):
+            err("fleet.reviewer", f"`{r.name}` is also a guard's or an agent's name")
+        seen_names[r.name] = "the reviewer"
+        seen_accounts[(r.machine, r.account)] = "the reviewer"
+    uids = {}
+    for where, t in ([(f"projects.{b.project}.{b.kind}", (doc["projects"][b.project].get(b.kind) or {})) for b in bots(doc)]
+                     + [(f"guards.{g}", gv) for g, gv in guards.items()] + [(f"agents.{a}", av) for a, av in agents.items()]
+                     + ([("fleet.reviewer", fleet.get("reviewer"))] if r is not None else [])):
+        u = t.get("uid") if isinstance(t, dict) else None
+        if isinstance(u, int) and not isinstance(u, bool):
+            if u in uids:
+                err(where, f"uid {u} is {uids[u]}'s already")
+            uids[u] = where
     for b in bots(doc):
         if b.name in guard_names:
             err(f"projects.{b.project}.{b.kind}", f"`{b.name}` is also a guard")
@@ -344,6 +432,7 @@ def summary(doc):
     projects = doc.get("projects") or {}
     with_bots = sum(1 for p in projects.values() if isinstance(p, dict) and (p.get("plan") or p.get("dev")))
     return (f"{len(doc.get('machines') or {})} machines, {len(doc.get('stacks') or {})} stacks, "
-            f"{len(projects)} projects ({with_bots} with bots), {len(b)} bots, "
+            f"{len(projects)} projects ({with_bots} with bots), {len(b)} bots"
+            + (f" and a reviewer ({reviewer(doc).name})" if reviewer(doc) else "") + ", "
             f"{len(doc.get('guards') or {})} guards, {len(doc.get('people') or {})} people"
             + (f", {len(doc['agents'])} agents" if doc.get("agents") else ""))

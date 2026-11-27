@@ -2,7 +2,8 @@
 
 Installs, root-owned, what the kit ships in `fleet_kit/data`: `bot-round`, `bot-review` and
 `fleet-token` to /usr/local/bin (0755), the four template units to /etc/systemd/system (0644,
-the machine's `home_root` written in), makes `agents_dir/status` (the status files, setgid,
+the machine's `home_root` written in; with a reviewer in the file also `bot-review-for@` and its
+timer, one instance per reviewed project), makes `agents_dir/status` (the status files, setgid,
 group of `agents_dir`) and each bot's `work/` or `review/` and `log/` (750, the bot's), then
 `systemctl daemon-reload`, enables the timers of the bots of this machine and disables the
 timers of a paused project. It starts nothing: the first round is the owner's `systemctl start`
@@ -25,6 +26,7 @@ from . import render
 
 SCRIPTS = ("bot-round", "bot-review", "fleet-token")
 UNITS = ("bot-round@.service", "bot-round@.timer", "bot-review@.service", "bot-review@.timer")
+REVIEWER_UNITS = ("bot-review-for@.service", "bot-review-for@.timer")   # the fleet's reviewer, one instance per project
 BIN_DIR = "/usr/local/bin"
 UNIT_DIR = "/etc/systemd/system"
 
@@ -127,9 +129,46 @@ def apply(doc, machine, root="/", dry_run=False, systemctl=None, start=False):
         out.append((t.install_text(f"{BIN_DIR}/{s}", data(s), 0o755), f"{BIN_DIR}/{s}"))
     for u in UNITS:
         out.append((t.install_text(f"{UNIT_DIR}/{u}", data(u).replace("{home_root}", home_root), 0o644), f"{UNIT_DIR}/{u}"))
+    rv = fl.reviewer if fl.reviewer and fl.reviewer.machine == machine else None
+    if rv:
+        for u in REVIEWER_UNITS:
+            out.append((t.install_text(f"{UNIT_DIR}/{u}", data(u).replace("{home_root}", home_root).replace("{reviewer}", rv.account), 0o644),
+                        f"{UNIT_DIR}/{u}"))
     out.append((t.ensure_dir(f"{agents_dir}/status", 0o2775, "root", group_of(t, agents_dir)), f"{agents_dir}/status"))
     mine = [(p, kind, b, acct) for pname, p, kind, b, acct, bm in fl.bots() if bm == machine]
     t.systemctl("daemon-reload")
+    if rv:
+        home, _ = fl.paths(machine, rv.account)
+        try:
+            pwd.getpwnam(rv.account)
+            have = True
+        except KeyError:
+            have = t.root != Path("/")
+        if not have:
+            out.append(("missing", f"account {rv.account}: no user, no directories, no timers (fleet apply accounts)"))
+        else:
+            out.append((t.ensure_dir(f"{home}/review", 0o750, rv.account, rv.account), f"{home}/review"))
+            out.append((t.ensure_dir(f"{home}/log", 0o750, rv.account, rv.account), f"{home}/log"))
+            wanted = {f"bot-review-for@{pn}.timer" for pn, _ in fl.reviewed()}
+            for unit in sorted(wanted):
+                st = t.unit_state(unit)
+                if st.get("UnitFileState") != "enabled":
+                    t.systemctl("enable", unit)
+                    out.append(("enabled", unit))
+                else:
+                    out.append(("kept", f"{unit} enabled"))
+                if start and st.get("ActiveState") != "active":
+                    t.systemctl("start", unit)
+                    out.append(("started", unit))
+            # a project that fell out (paused, no dev bot, gone): its timer off
+            for pn, p in fl.projects.items():
+                unit = f"bot-review-for@{pn}.timer"
+                if unit in wanted:
+                    continue
+                st = t.unit_state(unit)
+                if st.get("UnitFileState") == "enabled" or st.get("ActiveState") == "active":
+                    t.systemctl("disable", "--now", unit)
+                    out.append(("disabled", f"{unit} (not reviewed any more)"))
     for p, kind, b, acct in mine:
         home, _ = fl.paths(machine, acct)
         try:

@@ -81,16 +81,23 @@ the plans) so that every change is a commit.
 
 ## Step 2: GitHub
 
-For every bot a **GitHub App** (no second account: GitHub allows one machine account per
+The bots act as **GitHub Apps** (no second account: GitHub allows one machine account per
 person, none registered by bots; an App is free, has its own name, rights per repository
-and tokens that expire after an hour). `fleet add-project` prints these steps for a new
-project; for the first one, by hand on GitHub, Settings > Developer settings > GitHub Apps:
+and tokens that expire after an hour). Two per fleet are enough, made once by hand on
+GitHub, Settings > Developer settings > GitHub Apps, and named in the file as `[apps] dev`
+and `review`:
 
-1. New GitHub App, named `<owner>-<bot>` (the file's default; `app = ` in the bot's table
-   when it differs), webhook off. Repository permissions: Contents read/write, Issues
-   read/write, Pull requests read/write, Metadata read, Checks read, Actions read.
-2. Generate a private key (the `.pem`), note the App ID.
-3. Install the App on your account, restricted to the project's repository.
+1. New GitHub App `<owner>-fleet-dev`, webhook off. Repository permissions: Contents
+   read/write, Issues read/write, Pull requests read/write, Metadata read, Checks read,
+   Actions read. The dev bots write with it.
+2. New GitHub App `<owner>-fleet-review`, the same but Contents read. The reviewer and the
+   plan bots comment, label and approve with it; two Apps because GitHub lets no author
+   approve its own pull request.
+3. For each: generate a private key (the `.pem`), note the App ID, install the App on your
+   account for **all repositories**. A new project then needs no step here at all.
+
+One App per bot (`app = ` in the bot's table, named `<owner>-<bot>`, installed on the
+project's repository only) still works and is what `fleet add-project` printed before.
 
 Then the repository:
 
@@ -109,9 +116,9 @@ instead of building. Without CI the dev bot names in the pull request what it ra
 
 ## Step 3: the machine
 
-One Unix account per bot, home under `home_root/<account>` (mode 0750), no sudo, no ssh from
-outside; in it the project's clone, `~/.config/fleet/app-id` (one line) and `app.pem` (mode
-600), `~/.claude` with the login (`sudo -u <bot> claude`, sign in once), `work/` for the dev
+One Unix account per bot (and one for the fleet's reviewer), home under `home_root/<account>`
+(mode 0750), no sudo, no ssh from outside; in it the project's clone, `~/.config/fleet/app-id`
+(one line) and `app.pem` (mode 600) of the App it uses, `~/.claude` with the login (`sudo -u <bot> claude`, sign in once), `work/` for the dev
 bot's worktrees, `log/`. `loginctl enable-linger <bot>` so its timers run without a login.
 Why not everything under your user: then every bot reads every key and can kill every other
 bot; with own accounts the kernel keeps them apart and every log line, commit and file says

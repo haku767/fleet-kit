@@ -1,0 +1,11 @@
+[Unit]
+Description=the fleet's reviewer: a review round for project %i every 20 minutes (fleet-kit)
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=20min
+RandomizedDelaySec=4min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

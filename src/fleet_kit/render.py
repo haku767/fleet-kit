@@ -5,7 +5,11 @@
 - `bots/<account>.conf`: one per project bot, named after its Unix account (what a script
   knows as `$me`; `name=` inside is the register name), POSIX sh, sourced by bot-round
   (kind=dev) and bot-review (kind=plan) in place of their case blocks; the same variable
-  names as those.
+  names as those. `bots/<reviewer>.<project>.conf` (kind=review): what the fleet's reviewer
+  reads for one project (`bot-review --project <project>`).
+- `machines/<machine>/fleet.json`: the machine's part of the fleet as data (accounts with
+  their uids and kinds, the timers, the courier's lists), for a machine whose configuration
+  is code and reads the fleet from one file instead of restating it.
 - `machines/<machine>/lists.sh`: the account lists the install scripts hold (`bots`, `ssh_bots`,
   `round_bots`, `review_bots`, `paused_bots`) for every machine with role bots.
 - `machines/<machine>/courier.sh`: the courier's lists (`to_bots`, `from_bots`) for a machine
@@ -16,6 +20,8 @@
 
 import json
 import re
+
+from . import model
 
 # every round gets these besides git and gh: read-only looks around the worktree
 COMMON_ALLOW = ["bash -n *", "sh -n *", "find *", "ls *", "cat *", "head *", "tail *", "wc *", "grep *",
@@ -49,10 +55,27 @@ class Fleet:
         self.projects = doc.get("projects") or {}
         self.guards = doc.get("guards") or {}
         self.agents = doc.get("agents") or {}   # a person's own sessions with an inbox
+        self.apps = doc.get("apps") or {}       # the fleet's two Apps (dev, review) and [apps.<name>] per foreign owner
+        self.reviewer = model.reviewer(doc)     # the fleet's reviewer (a Bot of kind review), or None
         self.bots_machines = [m for m, v in self.machines.items() if v.get("role") == "bots"]
 
-    def app(self, bot):
-        return bot.get("app") or f"{self.owner}-{bot['name']}"
+    def app(self, bot, kind="dev"):
+        """A bot's App slug: its own `app`, else the fleet's App for its kind ([apps] dev for a
+        dev bot, review for a plan bot and the reviewer), else `<owner>-<name>`."""
+        if bot.get("app"):
+            return bot["app"]
+        fleet_app = self.apps.get("review" if kind in ("plan", "review") else "dev")
+        return fleet_app if isinstance(fleet_app, str) else f"{self.owner}-{bot['name']}"
+
+    def reviewer_dict(self):
+        return (self.fleet.get("reviewer") or {}) if self.reviewer else {}
+
+    def reviewed(self):
+        """(project name, project) for every project the fleet's reviewer reviews: with a dev
+        bot, not paused."""
+        if not self.reviewer:
+            return []
+        return [(pn, p) for pn, p in self.projects.items() if isinstance(p.get("dev"), dict) and not p.get("paused")]
 
     def machine_of(self, project, bot):
         return bot.get("machine") or project.get("machine") or (self.bots_machines[0] if self.bots_machines else None)
@@ -140,10 +163,15 @@ class Fleet:
         return {k: v.replace("{scratch}", scratch).replace("{home}", home) for k, v in env.items()}
 
     def trusted(self, p):
+        """Who may set `ready`: the owner, the fleet's reviewer, the project's plan bot, `ready_also`."""
         who = [self.owner]
+        if self.reviewer:
+            who.append(f"{self.app(self.reviewer_dict(), 'review')}[bot]")
         plan = p.get("plan")
         if isinstance(plan, dict) and plan.get("name"):
-            who.append(f"{self.app(plan)}[bot]")
+            app = f"{self.app(plan, 'plan')}[bot]"
+            if app not in who:
+                who.append(app)
         who += p.get("ready_also") or []
         return " ".join(who)
 
@@ -166,7 +194,7 @@ def conf(fl, pname, p, kind, b, account, machine):
     repo = p.get("repo", "")
     home, _ = fl.paths(machine, account)
     m = fl.machines.get(machine) or {}
-    lines = [HEADER.format(account=account, fleet=fl.fleet.get("name", "")).rstrip("\n")]
+    lines = [HEADER.format(account=f"{account}.{pname}" if kind == "review" else account, fleet=fl.fleet.get("name", "")).rstrip("\n")]
     common = [("kind", kind), ("project", pname), ("name", b["name"]), ("account", account),
               ("machine", machine or ""), ("paused", "yes" if p.get("paused") else "no"), ("repo", repo),
               ("dir", f"{home}/{repo.rsplit('/', 1)[-1]}"),
@@ -177,12 +205,12 @@ def conf(fl, pname, p, kind, b, account, machine):
         lines.append(f"{k}={q(v)}")
     defaults = fl.doc.get("defaults") or {}
     if kind == "dev":
-        lines += [f"app={q(fl.app(b))}", f"trusted={q(fl.trusted(p))}", f"test_cmd={q(fl.test_cmd(p))}",
+        lines += [f"app={q(fl.app(b, 'dev'))}", f"trusted={q(fl.trusted(p))}", f"test_cmd={q(fl.test_cmd(p))}",
                   f"test_cmd_nix={q(fl.test_cmd_addon(p))}", f"allow={q(fl.allow(p))}"]
         knobs = dict(ROUND_DEFAULTS, **(defaults.get("round") or {}))
-    else:
+    else:   # plan (its own review rounds) or review (the fleet's reviewer, one conf per project)
         dev = p.get("dev") if isinstance(p.get("dev"), dict) else None
-        lines += [f"app={q(fl.app(dev) if dev else '')}", f"reviewer={q(fl.app(b) + '[bot]')}",
+        lines += [f"app={q(fl.app(dev, 'dev') if dev else '')}", f"reviewer={q(fl.app(b, kind) + '[bot]')}",
                   f"ci={q(p.get('ci', 'yes'))}", f"ci_checks={q(fl.ci_checks(p))}",
                   f"review_note={q(p.get('review_note', ''))}"]
         knobs = dict(REVIEW_DEFAULTS, **(defaults.get("review") or {}))
@@ -209,20 +237,25 @@ def lists(fl):
         rounds = [a for _, p, kind, _, a, _ in mine if kind == "dev"]
         reviews = [a for _, p, kind, _, a, _ in mine if kind == "plan"]
         paused = [a for _, p, kind, _, a, _ in mine if p.get("paused")]
+        rv = fl.reviewer if fl.reviewer and fl.reviewer.machine == mname else None
+        if rv:
+            accounts.append(rv.account)
         out[f"machines/{mname}/lists.sh"] = (
             f"# /etc/fleet/lists.sh: written by `fleet apply lists` from fleet.toml ({fl.fleet.get('name', '')}) for {mname}; do not edit\n"
             f"bots={q(' '.join(accounts + ssh))}\nssh_bots={q(' '.join(ssh))}\nround_bots={q(' '.join(rounds))}\n"
-            f"review_bots={q(' '.join(reviews))}\npaused_bots={q(' '.join(paused))}\n")
+            f"review_bots={q(' '.join(reviews))}\npaused_bots={q(' '.join(paused))}\n"
+            f"reviewer={q(rv.account if rv else '')}\nreviewer_projects={q(' '.join(pn for pn, _ in fl.reviewed()) if rv else '')}\n")
     for mname, m in fl.machines.items():
         c = m.get("courier")
         if not c:
             continue
         to = c["to"]
+        rv_on = lambda m: [fl.reviewer.name] if fl.reviewer and fl.reviewer.machine == m else []
         to_names = [g for g, gv in fl.guards.items() if gv.get("machine") == to] + \
-                   [b["name"] for *_, b, _a, bm in all_bots if bm == to] + \
+                   [b["name"] for *_, b, _a, bm in all_bots if bm == to] + rv_on(to) + \
                    [a for a, av in fl.agents.items() if av.get("machine") == to]
         from_names = [g for g, gv in fl.guards.items() if gv.get("machine") == mname] + \
-                     [b["name"] for *_, b, _a, bm in all_bots if bm == mname] + \
+                     [b["name"] for *_, b, _a, bm in all_bots if bm == mname] + rv_on(mname) + \
                      [a for a, av in fl.agents.items() if av.get("machine") == mname]
         # from_agents: the [agents] on this machine with the login that owns each inbox here
         # (name=account), for a machine whose module declares the inboxes (NixOS)
@@ -247,6 +280,8 @@ def tables(fl):
             paused.append(pname)
     botless = [p.get("repo", "").rsplit("/", 1)[-1] for p in fl.projects.values()
                if not any(isinstance(p.get(k), dict) for k in ("plan", "dev"))]
+    if fl.reviewer:
+        bots.append([fl.reviewer.name, "review", "", fl.reviewer.machine, "review", fl.reviewer.account])
     for g, gv in fl.guards.items():   # a guard's project: its own, else the first without bots (as fleet-collect)
         proj = fl.projects.get(gv.get("project"), {}).get("repo", "").rsplit("/", 1)[-1] or (botless[0] if botless else "")
         bots.append([g, "guard", proj, gv.get("machine"), "none", g])
@@ -259,14 +294,66 @@ def tables(fl):
 
 
 def rules_table(fl):
-    rows = ["| Project | Plan bot | Dev bot | Repository |", "|---|---|---|---|"]
+    rows = ["| Project | Kind | Plan bot | Dev bot | Repository |", "|---|---|---|---|---|"]
     for pname, p in fl.projects.items():
         plan, dev = p.get("plan"), p.get("dev")
         if not (isinstance(plan, dict) or isinstance(dev, dict)):
             continue
-        rows.append(f"| {pname}{' (paused)' if p.get('paused') else ''} | {plan.get('name', '') if isinstance(plan, dict) else ''} "
+        rows.append(f"| {pname}{' (paused)' if p.get('paused') else ''} | {model.kind_of(p)} "
+                    f"| {plan.get('name', '') if isinstance(plan, dict) else ''} "
                     f"| {dev.get('name', '') if isinstance(dev, dict) else ''} | {p.get('repo', '')} |")
+    if fl.reviewer:
+        rows.append(f"\nReviewer for every project: {fl.reviewer.name}.")
     return "\n".join(rows) + "\n"
+
+
+def machine_json(fl, mname):
+    """The machine's part of the fleet as data: every account that lives here with its uid (when
+    the file says one), kind, project, home and scratch, whether it lingers and has an inbox; the
+    timers to enable; the courier's lists. What a declarative machine reads."""
+    m = fl.machines.get(mname) or {}
+    accounts, timers = [], []
+    for pname, p, kind, b, acct, bm in fl.bots():
+        if bm != mname:
+            continue
+        home, scratch = fl.paths(mname, acct)
+        accounts.append({"account": acct, "name": b["name"], "uid": b.get("uid"), "kind": kind, "project": pname,
+                         "repo": p.get("repo", ""), "home": home, "scratch": scratch, "linger": True, "inbox": True,
+                         "paused": bool(p.get("paused")), "app": fl.app(b, kind)})
+        if not p.get("paused"):
+            timers.append({"unit": f"bot-round@{acct}.timer" if kind == "dev" else f"bot-review@{acct}.timer",
+                           "account": acct, "project": pname})
+    if fl.reviewer and fl.reviewer.machine == mname:
+        rv, r = fl.reviewer, fl.reviewer_dict()
+        home, scratch = fl.paths(mname, rv.account)
+        accounts.append({"account": rv.account, "name": rv.name, "uid": r.get("uid"), "kind": "review", "project": "*",
+                         "repo": "", "home": home, "scratch": scratch, "linger": True, "inbox": True, "paused": False,
+                         "app": fl.app(r, "review")})
+        timers += [{"unit": f"bot-review-for@{pn}.timer", "account": rv.account, "project": pn} for pn, _ in fl.reviewed()]
+    for g, gv in fl.guards.items():
+        if gv.get("machine") == mname:
+            home, scratch = fl.paths(mname, g)
+            accounts.append({"account": g, "name": g, "uid": gv.get("uid"), "kind": "guard", "project": gv.get("project", ""),
+                             "repo": "", "home": home, "scratch": scratch, "linger": True, "inbox": True, "paused": False,
+                             "apps": gv.get("apps") or []})
+    for a, av in fl.agents.items():
+        if av.get("machine") == mname:
+            own = av.get("account") == a
+            home, scratch = fl.paths(mname, a) if own else (None, None)
+            accounts.append({"account": av.get("account", ""), "name": a, "uid": av.get("uid") if own else None,
+                             "kind": "agent", "project": "", "repo": "", "home": home, "scratch": scratch,
+                             "linger": own, "inbox": True, "paused": False})
+    courier = m.get("courier") or None
+    lists_ = lists(fl)
+    doc = {"fleet": fl.fleet.get("name", ""), "owner": fl.owner, "machine": mname, "family": m.get("family"),
+           "home_root": m.get("home_root", "/srv"), "scratch_root": m.get("scratch_root"), "agents_dir": fl.fleet.get("agents_dir", "/srv/agents"),
+           "admin": m.get("admin"), "guard": m.get("guard"), "apps": {k: v for k, v in fl.apps.items() if not isinstance(v, dict)},
+           "foreign_apps": {k: v for k, v in fl.apps.items() if isinstance(v, dict)},
+           "reviewer": fl.reviewer.account if fl.reviewer and fl.reviewer.machine == mname else None,
+           "reviewed": [pn for pn, _ in fl.reviewed()] if fl.reviewer and fl.reviewer.machine == mname else [],
+           "accounts": accounts, "timers": timers, "courier": courier,
+           "courier_lists": lists_.get(f"machines/{mname}/courier.sh")}
+    return json.dumps(doc, indent=1) + "\n"
 
 
 def render(doc):
@@ -274,7 +361,12 @@ def render(doc):
     out = {}
     for pname, p, kind, b, account, machine in fl.bots():
         out[f"bots/{account}.conf"] = conf(fl, pname, p, kind, b, account, machine)
+    if fl.reviewer:
+        for pname, p in fl.reviewed():
+            out[f"bots/{fl.reviewer.account}.{pname}.conf"] = conf(fl, pname, p, "review", fl.reviewer_dict(), fl.reviewer.account, fl.reviewer.machine)
     out.update(lists(fl))
+    for mname in fl.machines:
+        out[f"machines/{mname}/fleet.json"] = machine_json(fl, mname)
     out["tables.json"] = tables(fl)
     out["rules-table.md"] = rules_table(fl)
     return out
@@ -292,7 +384,8 @@ def apply_lists(files, machine, directory, dry_run=False):
     """Puts this machine's lists.sh (a bots machine) and courier.sh (a machine with a courier)
     into `directory` as /etc/fleet/lists.sh and /etc/fleet/courier.sh; removes one of the two
     there when the render no longer has it for this machine. Same return as apply_conf."""
-    wanted = {rel.rsplit("/", 1)[1]: text for rel, text in files.items() if rel.startswith(f"machines/{machine}/")}
+    wanted = {rel.rsplit("/", 1)[1]: text for rel, text in files.items()
+              if rel.startswith(f"machines/{machine}/") and rel.endswith(".sh")}   # fleet.json is the render's, not /etc's
     return apply_files(wanted, directory, "written by `fleet apply lists`", ("lists.sh", "courier.sh"), dry_run)
 
 
