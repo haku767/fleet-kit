@@ -320,7 +320,7 @@ def machine_json(fl, mname):
         accounts.append({"account": acct, "name": b["name"], "uid": b.get("uid"), "kind": kind, "project": pname,
                          "repo": p.get("repo", ""), "home": home, "scratch": scratch, "linger": True, "inbox": True,
                          "paused": bool(p.get("paused")), "app": fl.app(b, kind)})
-        if not p.get("paused"):
+        if not p.get("paused") and not (kind == "plan" and fl.reviewer):   # with a reviewer the plan bots' own review rounds are off
             timers.append({"unit": f"bot-round@{acct}.timer" if kind == "dev" else f"bot-review@{acct}.timer",
                            "account": acct, "project": pname})
     if fl.reviewer and fl.reviewer.machine == mname:

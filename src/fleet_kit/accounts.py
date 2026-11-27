@@ -203,8 +203,14 @@ def apply_accounts(doc, machine, root="/", dry_run=False, run=None, user_exists=
     mine = [(kind, b, acct) for pname, p, kind, b, acct, bm in fl.bots() if bm == machine]
     accounts = [(kind, acct) for kind, b, acct in mine] + [("guard", g) for g in courier_guards(doc, machine)] \
         + [("agent", a) for a in own_agents(doc, machine)]
+    # the uid the file pins for an account (bots, guards, agents, the reviewer): useradd --uid
+    uids = {acct: b.get("uid") for kind, b, acct in mine if isinstance(b.get("uid"), int)}
+    uids.update({g: gv["uid"] for g, gv in (doc.get("guards") or {}).items() if isinstance(gv.get("uid"), int)})
+    uids.update({a: av["uid"] for a, av in fl.agents.items() if isinstance(av.get("uid"), int)})
     if fl.reviewer and fl.reviewer.machine == machine:   # the fleet's reviewer: an account like a plan bot's
         accounts.append(("review", fl.reviewer.account))
+        if isinstance(fl.reviewer_dict().get("uid"), int):
+            uids[fl.reviewer.account] = fl.reviewer_dict()["uid"]
     if fl.apps and not s.user("fleet"):   # the token service's account: a system account, no home of its own, no linger
         s.run("useradd", "--system", "--no-create-home", "--home-dir", "/var/lib/fleet", "--shell", "/usr/bin/nologin",
               "--comment", "fleet token service (fleet)", "fleet")
@@ -213,6 +219,7 @@ def apply_accounts(doc, machine, root="/", dry_run=False, run=None, user_exists=
         home, scratch = fl.paths(machine, acct)
         if not s.user(acct):
             s.run("useradd", "--create-home", "--home-dir", home, "--groups", GROUP, "--shell", "/bin/bash",
+                  *(["--uid", str(uids[acct])] if acct in uids else []),
                   "--comment", f"{kind if kind in ('guard', 'agent') else 'reviewer' if kind == 'review' else 'bot'} {acct} (fleet)", acct)
             out.append(("added", f"account {acct}, home {home}"))
         out.append((s.ensure_dir(home, 0o750, acct, acct), f"{home} (750)"))
