@@ -95,6 +95,11 @@ and `review`:
    approve its own pull request.
 3. For each: generate a private key (the `.pem`), note the App ID, install the App on your
    account for **all repositories**. A new project then needs no step here at all.
+4. On the machine the keys go to the token service, not to the bots: `/var/lib/fleet/apps/
+   <slug>/app-id` and `app.pem` (owner `fleet`, mode 600; `fleet apply accounts` makes the
+   account, `fleet apply rounds` installs and enables `fleet-tokend`, `--start` or `systemctl
+   start fleet-tokend` once the keys are there). From then on `fleet-token` in any bot account
+   asks the socket and gets a token for its own project and role only.
 
 One App per bot (`app = ` in the bot's table, named `<owner>-<bot>`, installed on the
 project's repository only) still works and is what `fleet add-project` printed before.
@@ -118,7 +123,7 @@ instead of building. Without CI the dev bot names in the pull request what it ra
 
 One Unix account per bot (and one for the fleet's reviewer), home under `home_root/<account>`
 (mode 0750), no sudo, no ssh from outside; in it the project's clone, `~/.config/fleet/app-id`
-(one line) and `app.pem` (mode 600) of the App it uses, `~/.claude` with the login (`sudo -u <bot> claude`, sign in once), `work/` for the dev
+(one line) and `app.pem` (mode 600) of the App it uses when the fleet has no token service, `~/.claude` with the login (`sudo -u <bot> claude`, sign in once), `work/` for the dev
 bot's worktrees, `log/`. `loginctl enable-linger <bot>` so its timers run without a login.
 Why not everything under your user: then every bot reads every key and can kill every other
 bot; with own accounts the kernel keeps them apart and every log line, commit and file says

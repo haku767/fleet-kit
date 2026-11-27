@@ -3,7 +3,8 @@
 Installs, root-owned, what the kit ships in `fleet_kit/data`: `bot-round`, `bot-review` and
 `fleet-token` to /usr/local/bin (0755), the four template units to /etc/systemd/system (0644,
 the machine's `home_root` written in; with a reviewer in the file also `bot-review-for@` and its
-timer, one instance per reviewed project), makes `agents_dir/status` (the status files, setgid,
+timer, one instance per reviewed project; with [apps] the token service `fleet-tokend` and its
+unit, enabled, started with --start once the keys are in place), makes `agents_dir/status` (the status files, setgid,
 group of `agents_dir`) and each bot's `work/` or `review/` and `log/` (750, the bot's), then
 `systemctl daemon-reload`, enables the timers of the bots of this machine and disables the
 timers of a paused project. It starts nothing: the first round is the owner's `systemctl start`
@@ -25,6 +26,7 @@ from pathlib import Path
 from . import render
 
 SCRIPTS = ("bot-round", "bot-review", "fleet-token")
+TOKEND = ("fleet-tokend", "fleet-tokend.service")   # the token service, with [apps] in the file; account `fleet`
 UNITS = ("bot-round@.service", "bot-round@.timer", "bot-review@.service", "bot-review@.timer")
 REVIEWER_UNITS = ("bot-review-for@.service", "bot-review-for@.timer")   # the fleet's reviewer, one instance per project
 BIN_DIR = "/usr/local/bin"
@@ -129,6 +131,9 @@ def apply(doc, machine, root="/", dry_run=False, systemctl=None, start=False):
         out.append((t.install_text(f"{BIN_DIR}/{s}", data(s), 0o755), f"{BIN_DIR}/{s}"))
     for u in UNITS:
         out.append((t.install_text(f"{UNIT_DIR}/{u}", data(u).replace("{home_root}", home_root), 0o644), f"{UNIT_DIR}/{u}"))
+    if fl.apps:
+        out.append((t.install_text(f"{BIN_DIR}/fleet-tokend", data("fleet-tokend"), 0o755), f"{BIN_DIR}/fleet-tokend"))
+        out.append((t.install_text(f"{UNIT_DIR}/fleet-tokend.service", data("fleet-tokend.service"), 0o644), f"{UNIT_DIR}/fleet-tokend.service"))
     rv = fl.reviewer if fl.reviewer and fl.reviewer.machine == machine else None
     if rv:
         for u in REVIEWER_UNITS:
@@ -137,6 +142,28 @@ def apply(doc, machine, root="/", dry_run=False, systemctl=None, start=False):
     out.append((t.ensure_dir(f"{agents_dir}/status", 0o2775, "root", group_of(t, agents_dir)), f"{agents_dir}/status"))
     mine = [(p, kind, b, acct) for pname, p, kind, b, acct, bm in fl.bots() if bm == machine]
     t.systemctl("daemon-reload")
+    if fl.apps:
+        try:
+            pwd.getpwnam("fleet")
+            have = True
+        except KeyError:
+            have = t.root != Path("/")
+        if not have:
+            out.append(("missing", "account fleet: the token service needs it (fleet apply accounts)"))
+        else:
+            st = t.unit_state("fleet-tokend.service")
+            if st.get("UnitFileState") != "enabled":
+                t.systemctl("enable", "fleet-tokend.service")
+                out.append(("enabled", "fleet-tokend.service"))
+            else:
+                out.append(("kept", "fleet-tokend.service enabled"))
+            if st.get("ActiveState") != "active":
+                if start:
+                    t.systemctl("start", "fleet-tokend.service")
+                    out.append(("started", "fleet-tokend.service"))
+                else:
+                    out.append(("kept", "fleet-tokend.service not started: put the Apps' keys under /var/lib/fleet/apps/<slug>/ "
+                                        "(app-id, app.pem; the account fleet's, 600), then systemctl start fleet-tokend, or --start"))
     if rv:
         home, _ = fl.paths(machine, rv.account)
         try:

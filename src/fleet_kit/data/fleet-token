@@ -2,7 +2,11 @@
 """fleet-token: this bot's GitHub identity, a GitHub App of its own (fleet-kit; docs/eigene-fleet.md
 in haku767/fleet says how to make the App).
 
-Installed root-owned in /usr/local/bin by `fleet apply rounds`. Per bot account:
+Installed root-owned in /usr/local/bin by `fleet apply rounds`. Where the fleet runs its token
+service (fleet-tokend, socket /run/fleet/token.sock), the token comes from there: the service
+knows from fleet.toml which project and role this account has and mints a token for that
+repository and those rights; no key lives in the account. Without the service, or when it does
+not serve this account, the keys of the account's own App are used, per bot account:
   ~/.config/fleet/app-id    the App's ID (GitHub: the App's settings page, "App ID")
   ~/.config/fleet/app.pem   its private key
   ~/.config/fleet/<name>/   the same for a second App of this bot (a guard's App for a project
@@ -11,7 +15,9 @@ Installed root-owned in /usr/local/bin by `fleet apply rounds`. Per bot account:
 
   fleet-token                     print an installation token (valid for an hour, cached): the
                                   App's installation on its own account, the bot's repositories
-  fleet-token --app <name>        the same for the second App in ~/.config/fleet/<name>/
+  fleet-token --app <name>        the same for the second App in ~/.config/fleet/<name>/ (with the
+                                  service: that App's token, or "dev" for a guard's write token)
+  fleet-token --read              with the service: a read-only token
   fleet-token setup               git and gh use the App: credential helper, the App as commit author,
                                   ~/.local/bin/gh that runs gh with the token
   fleet-token git-credential get  git's credential helper (set up by "setup")
@@ -22,6 +28,29 @@ from pathlib import Path
 CONF = Path.home() / ".config/fleet"
 CACHE = Path.home() / ".cache/fleet/token.json"
 API = "https://api.github.com"
+SOCK = os.environ.get("FLEET_TOKEN_SOCKET", "/run/fleet/token.sock")
+
+
+def from_service(app=None, scope=None, path=None):
+    """Ask the fleet's token service. Returns its answer (a dict with token or error), or None
+    when there is no service to ask (no socket, or nothing listening)."""
+    path = path or SOCK
+    if not os.path.exists(path):
+        return None
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(90)   # a fresh token takes GitHub round trips
+            s.connect(path)
+            s.sendall((json.dumps({"app": app, "scope": scope}) + "\n").encode())
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+        return json.loads(data or b"{}")
+    except (OSError, ValueError):
+        return None
 
 
 def b64(data):
@@ -70,7 +99,14 @@ def installation(auth):
     return next((i for i in inst if i["account"]["login"].lower() == own), inst[0])
 
 
-def token(app=None):
+def token(app=None, scope=None):
+    served = from_service(app, scope)
+    if served is not None:
+        if "token" in served:
+            return served["token"]
+        if not str(served.get("error", "")).startswith("not served"):
+            sys.exit(f"fleet-token: the token service says: {served.get('error')}")
+        # not served: this account has keys of its own
     conf = CONF / app if app else CONF
     cache = CACHE.with_name(f"token-{app}.json") if app else CACHE
     try:
@@ -90,11 +126,15 @@ def token(app=None):
 
 
 def setup():
-    slug = api("GET", "/app", f"Bearer {jwt()}")["slug"]
-    bot = api("GET", f"/users/{slug}%5Bbot%5D", f"token {token()}")
+    served = from_service()
+    if served is not None and "token" in served:
+        slug, bot_id = served["slug"], served["bot_id"]
+    else:
+        slug = api("GET", "/app", f"Bearer {jwt()}")["slug"]
+        bot_id = api("GET", f"/users/{slug}%5Bbot%5D", f"token {token()}")["id"]
     git = lambda *a: subprocess.run(["git", "config", "--global", *a], check=True)
     git("user.name", f"{slug}[bot]")
-    git("user.email", f"{bot['id']}+{slug}[bot]@users.noreply.github.com")
+    git("user.email", f"{bot_id}+{slug}[bot]@users.noreply.github.com")
     subprocess.run(["git", "config", "--global", "--unset-all", "credential.https://github.com.helper"])
     git("--add", "credential.https://github.com.helper", "")
     git("--add", "credential.https://github.com.helper", "!/usr/local/bin/fleet-token git-credential")
@@ -114,6 +154,8 @@ def main():
     args = sys.argv[1:]
     if not args:
         print(token())
+    elif args == ["--read"]:
+        print(token(None, "read"))
     elif len(args) == 2 and args[0] == "--app" and args[1] and "/" not in args[1]:
         print(token(args[1]))
     elif args == ["setup"]:

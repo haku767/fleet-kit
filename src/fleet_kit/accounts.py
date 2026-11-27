@@ -205,6 +205,10 @@ def apply_accounts(doc, machine, root="/", dry_run=False, run=None, user_exists=
         + [("agent", a) for a in own_agents(doc, machine)]
     if fl.reviewer and fl.reviewer.machine == machine:   # the fleet's reviewer: an account like a plan bot's
         accounts.append(("review", fl.reviewer.account))
+    if fl.apps and not s.user("fleet"):   # the token service's account: a system account, no home of its own, no linger
+        s.run("useradd", "--system", "--no-create-home", "--home-dir", "/var/lib/fleet", "--shell", "/usr/bin/nologin",
+              "--comment", "fleet token service (fleet)", "fleet")
+        out.append(("added", "account fleet (system, for fleet-tokend)"))
     for kind, acct in accounts:
         home, scratch = fl.paths(machine, acct)
         if not s.user(acct):

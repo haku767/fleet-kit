@@ -44,7 +44,7 @@ KEYS = {
                 "allow_extra", "env", "runner", "reads", "deploy", "paused", "owner_app", "ready_also", "plan", "dev", "machine",
                 "reviews", "kind"},
     "bot": {"name", "account", "app", "persona", "budget_usd", "machine", "uid"},
-    "guard": {"machine", "project", "persona", "apps", "uid"},
+    "guard": {"machine", "project", "persona", "apps", "uid", "writes"},
     "agent": {"machine", "account", "persona", "uid"},
     "person": {"role", "projects"},
     "label": {"color", "description"},
@@ -290,6 +290,9 @@ def check(text, doc):
             err(w, f"project `{g['project']}` is not in [projects]")
         if "uid" in g and (isinstance(g["uid"], bool) or not isinstance(g["uid"], int) or g["uid"] < 1000):
             err(w, "uid must be a whole number from 1000")
+        for pr in g.get("writes") or []:   # the projects the guard writes to with the dev App (the token service)
+            if pr not in (doc.get("projects") or {}):
+                err(w, f"writes names `{pr}`, not a project")
     # [agents.<name>]: a person's own session with an inbox of its own (no rounds, no App): machine
     # says where it runs, account the login it runs in, the inbox's owner there; an account equal to
     # the agent's name is a service account of its own, which `apply accounts` makes. The courier carries its mail like a bot's; elsewhere the courier guard owns it.
