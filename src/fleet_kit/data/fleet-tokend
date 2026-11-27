@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+"""fleet-tokend: the fleet's token service (fleet-kit). One small daemon under a service account
+that holds the fleet's App keys; the bots hold none. It listens on a Unix socket, reads the
+caller's uid from the kernel, looks the account up in fleet.toml (which bot, which project,
+which role) and mints a GitHub App installation token restricted to that project's repository
+and the role's permissions. `fleet-token` is its client.
+
+  fleet-tokend [--file /etc/fleet/fleet.toml] [--socket /run/fleet/token.sock] [--keys /var/lib/fleet/apps]
+
+Keys: <keys>/<app slug>/app-id (one line) and app.pem (mode 600), one directory per App named
+in [apps] (dev, review, and [apps.<name>] slug). The socket is group-readable for `agents`.
+
+Protocol: one JSON line in, one out. In: {"app": null | "dev" | "review" | "<name>", "scope":
+null | "read"}; out: {"token": ..., "until": <epoch>, "slug": ..., "bot_id": ...} or {"error": ...}.
+Who gets what (from the file, by the caller's uid):
+  a dev bot        its project's repository, the dev App, write (contents, pull requests, issues)
+  a plan bot       its project's repository, the review App, review (pull requests, issues; contents read)
+  the reviewer     every reviewed project's repository, the review App, review
+  a guard          app "dev": the projects in [guards.<g>] writes, the dev App, write;
+                   else (the default) every repository the review App is installed on, read
+  anyone else      nothing ("not served"; fleet-token falls back to keys of its own)
+A repository under another owner needs [apps.<name>] with that owner; a bot of such a project
+gets that App, a guard gets it with app "<name>" (read).
+"""
+import base64, calendar, json, os, socket, socketserver, struct, subprocess, sys, threading, time, tomllib
+import urllib.error, urllib.request
+from pathlib import Path
+
+API = "https://api.github.com"
+WRITE = {"contents": "write", "pull_requests": "write", "issues": "write", "metadata": "read", "checks": "read", "actions": "read"}
+REVIEW = {"contents": "read", "pull_requests": "write", "issues": "write", "metadata": "read", "checks": "read", "actions": "read"}
+READ = {"contents": "read", "pull_requests": "read", "issues": "read", "metadata": "read", "checks": "read", "actions": "read"}
+MARGIN = 600          # seconds before a token's end at which a new one is minted
+RETRIES, PAUSES = 3, (2, 5)
+
+
+def b64(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def jwt(keys, slug):
+    d = keys / slug
+    app_id = (d / "app-id").read_text().strip()
+    now = int(time.time())
+    head = b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
+    body = b64(json.dumps({"iat": now - 60, "exp": now + 540, "iss": app_id}).encode())
+    sig = subprocess.run(["openssl", "dgst", "-sha256", "-sign", str(d / "app.pem")],
+                         input=f"{head}.{body}".encode(), capture_output=True, check=True).stdout
+    return f"{head}.{body}.{b64(sig)}"
+
+
+def api(method, path, auth, data=None):
+    req = urllib.request.Request(API + path, method=method, data=data,
+                                 headers={"Authorization": auth, "Accept": "application/vnd.github+json",
+                                          "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json"})
+    for attempt in range(RETRIES):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or attempt == RETRIES - 1:
+                raise
+        except (urllib.error.URLError, socket.timeout, ConnectionError, TimeoutError):
+            if attempt == RETRIES - 1:
+                raise
+        time.sleep(PAUSES[min(attempt, len(PAUSES) - 1)])
+
+
+class Fleet:
+    """What the file says about accounts: uid -> (kind, project, repo, writes)."""
+
+    def __init__(self, doc, getpwnam=None):
+        import pwd
+        self.doc = doc
+        self.owner = (doc.get("fleet") or {}).get("owner", "")
+        self.apps = doc.get("apps") or {}
+        self.projects = doc.get("projects") or {}
+        self.getpwnam = getpwnam or (lambda n: pwd.getpwnam(n).pw_uid)
+        self.by_uid = {}
+        for pname, p in self.projects.items():
+            for kind in ("plan", "dev"):
+                b = p.get(kind)
+                if isinstance(b, dict) and b.get("name"):
+                    self.add(b.get("account") or b["name"], kind, pname, p.get("repo", ""), [])
+        r = (doc.get("fleet") or {}).get("reviewer")
+        if isinstance(r, dict) and r.get("name"):
+            self.add(r.get("account") or r["name"], "review", "*", "", [])
+        for g, gv in (doc.get("guards") or {}).items():
+            self.add(g, "guard", gv.get("project", ""), "", gv.get("writes") or [])
+
+    def add(self, account, kind, project, repo, writes):
+        try:
+            uid = self.getpwnam(account)
+        except KeyError:
+            return   # not on this machine
+        self.by_uid[uid] = (account, kind, project, repo, writes)
+
+    def slug_for(self, role, owner):
+        """The App to use: the fleet's dev/review App for the owner's repositories, else the
+        [apps.<name>] App of that owner."""
+        if owner.lower() == self.owner.lower():
+            a = self.apps.get(role)
+            return a if isinstance(a, str) else None
+        for name, a in self.apps.items():
+            if isinstance(a, dict) and a.get("owner", "").lower() == owner.lower():
+                return a.get("slug")
+        return None
+
+    def grant(self, uid, want_app=None, scope=None):
+        """(slug, [repo names] or None for all, permissions) for a caller, or a str why not."""
+        who = self.by_uid.get(uid)
+        if not who:
+            return "not served: this account is no bot, reviewer or guard of the fleet"
+        account, kind, project, repo, writes = who
+        if kind == "dev":
+            owner, name = repo.split("/", 1)
+            slug = self.slug_for("dev", owner)
+            return (slug, [name], WRITE) if slug else f"no App for {owner} in [apps]"
+        if kind == "plan":
+            owner, name = repo.split("/", 1)
+            slug = self.slug_for("review", owner)
+            return (slug, [name], REVIEW) if slug else f"no App for {owner} in [apps]"
+        if kind == "review":
+            repos = [p.get("repo", "") for p in self.projects.values() if isinstance(p.get("dev"), dict) and not p.get("paused")]
+            by_owner = {}
+            for r in repos:
+                o, n = r.split("/", 1)
+                by_owner.setdefault(o, []).append(n)
+            # a foreign owner's project: with app "<name>"; the default is the fleet owner's projects
+            if want_app and want_app in self.apps and isinstance(self.apps[want_app], dict):
+                o = self.apps[want_app]["owner"]
+                return (self.apps[want_app]["slug"], by_owner.get(o, []), REVIEW)
+            slug = self.slug_for("review", self.owner)
+            return (slug, by_owner.get(self.owner, []), REVIEW) if slug else "no review App in [apps]"
+        if kind == "guard":
+            if want_app == "dev":
+                names = [self.projects[p].get("repo", "").split("/", 1)[1] for p in writes if p in self.projects]
+                slug = self.slug_for("dev", self.owner)
+                return (slug, names, WRITE) if slug and names else "no dev App, or [guards.<g>] writes is empty"
+            if want_app and want_app not in ("review", None) and isinstance(self.apps.get(want_app), dict):
+                return (self.apps[want_app]["slug"], None, READ)
+            slug = self.slug_for("review", self.owner)
+            return (slug, None, READ) if slug else "no review App in [apps]"
+        return "not served"
+
+
+class Minter:
+    """Installation tokens, cached per (slug, repositories, permissions)."""
+
+    def __init__(self, keys, api=api, now=time.time):
+        self.keys = Path(keys)
+        self.api = api
+        self.now = now
+        self.cache = {}
+        self.installations = {}
+        self.apps = {}
+        self.lock = threading.Lock()
+
+    def app(self, slug):
+        if slug not in self.apps:
+            a = self.api("GET", "/app", f"Bearer {jwt(self.keys, slug)}")
+            bot = self.api("GET", f"/users/{a['slug']}%5Bbot%5D", f"Bearer {jwt(self.keys, slug)}")
+            self.apps[slug] = (a["slug"], bot["id"])
+        return self.apps[slug]
+
+    def installation(self, slug, owner):
+        key = (slug, owner.lower())
+        if key not in self.installations:
+            inst = self.api("GET", "/app/installations", f"Bearer {jwt(self.keys, slug)}")
+            match = next((i for i in inst if i["account"]["login"].lower() == owner.lower()), None)
+            if not match:
+                raise LookupError(f"App {slug} is not installed on {owner}")
+            self.installations[key] = match["id"]
+        return self.installations[key]
+
+    def token(self, slug, owner, repos, perms):
+        key = (slug, owner.lower(), tuple(sorted(repos)) if repos is not None else None, tuple(sorted(perms.items())))
+        with self.lock:
+            c = self.cache.get(key)
+            if c and c["until"] > self.now() + MARGIN:
+                return c
+            body = {"permissions": perms}
+            if repos is not None:
+                body["repositories"] = sorted(repos)
+            t = self.api("POST", f"/app/installations/{self.installation(slug, owner)}/access_tokens",
+                         f"Bearer {jwt(self.keys, slug)}", json.dumps(body).encode())
+            until = calendar.timegm(time.strptime(t["expires_at"], "%Y-%m-%dT%H:%M:%SZ"))
+            app_slug, bot_id = self.app(slug)
+            c = {"token": t["token"], "until": until, "slug": app_slug, "bot_id": bot_id}
+            self.cache[key] = c
+            return c
+
+
+def answer(fleet, minter, uid, request):
+    """The JSON answer (a dict) for one request of one uid."""
+    want = request.get("app") if isinstance(request, dict) else None
+    scope = request.get("scope") if isinstance(request, dict) else None
+    if want in ("", "default"):
+        want = None
+    g = fleet.grant(uid, want, scope)
+    if isinstance(g, str):
+        return {"error": g}
+    slug, repos, perms = g
+    if scope == "read":
+        perms = READ
+    owner = fleet.owner
+    for name, a in fleet.apps.items():
+        if isinstance(a, dict) and a.get("slug") == slug:
+            owner = a.get("owner", owner)
+    try:
+        return dict(minter.token(slug, owner, repos, perms))
+    except urllib.error.HTTPError as e:
+        return {"error": f"GitHub answered {e.code} {e.reason} for {e.url} (App {slug}: ID, key, installation?)"}
+    except LookupError as e:
+        return {"error": str(e)}
+    except FileNotFoundError as e:
+        return {"error": f"{e.filename} is missing (the App's key directory)"}
+    except (urllib.error.URLError, socket.timeout, ConnectionError, TimeoutError) as e:
+        return {"error": f"no answer from GitHub after {RETRIES} attempts ({e})"}
+
+
+def peer_uid(sock):
+    creds = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+    _pid, uid, _gid = struct.unpack("3i", creds)
+    return uid
+
+
+def serve(doc, keys, path, group="agents"):
+    import grp
+    fleet = Fleet(doc)
+    minter = Minter(keys)
+
+    class Handler(socketserver.StreamRequestHandler):
+        def handle(self):
+            uid = peer_uid(self.request)
+            line = self.rfile.readline(65536)
+            try:
+                req = json.loads(line or b"{}")
+            except ValueError:
+                req = {}
+            out = answer(fleet, minter, uid, req)
+            self.wfile.write((json.dumps(out) + "\n").encode())
+
+    class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+        daemon_threads = True
+
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if p.exists():
+        p.unlink()
+    old = os.umask(0o117)
+    try:
+        srv = Server(str(p), Handler)
+    finally:
+        os.umask(old)
+    try:
+        os.chown(p, -1, grp.getgrnam(group).gr_gid)
+    except (KeyError, PermissionError):
+        pass
+    os.chmod(p, 0o660)
+    print(f"fleet-tokend: serving {len(fleet.by_uid)} accounts on {p}", flush=True)
+    srv.serve_forever()
+
+
+def main(argv):
+    file, path, keys = "/etc/fleet/fleet.toml", "/run/fleet/token.sock", "/var/lib/fleet/apps"
+    it = iter(argv)
+    for a in it:
+        if a == "--file":
+            file = next(it)
+        elif a == "--socket":
+            path = next(it)
+        elif a == "--keys":
+            keys = next(it)
+        else:
+            sys.exit(__doc__)
+    with open(file, "rb") as f:
+        doc = tomllib.load(f)
+    serve(doc, keys, path)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
