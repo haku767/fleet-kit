@@ -39,10 +39,10 @@ ci_checks="the repository's checks"   # what the dev bot runs itself when there 
 review_note=   # a sentence of the project's own for the prompt (its hard rules), after the checks; no leading space, the prompt adds it
 # /etc/fleet/bots/<account>.conf says what this bot is, as in bot-round (the case blocks went with
 # fleet PLANS 13 stage 3)
-conf_ok() {   # conf_ok <file>: root's, not writable by group or others, same for its directory
+conf_ok() {   # conf_ok <file>: root's, not writable by group or others, same for its directory (symlinks followed: on NixOS /etc/fleet/bots points into the store)
   for f in "$1" "${1%/*}"; do
-    [ "$(stat -c %u "$f" 2>/dev/null)" = 0 ] || return 1
-    case $(stat -c %A "$f") in ?????w*|????????w*) return 1 ;; esac
+    [ "$(stat -L -c %u "$f" 2>/dev/null)" = 0 ] || return 1
+    case $(stat -L -c %A "$f") in ?????w*|????????w*) return 1 ;; esac
   done
 }
 # `bot-review --project <p>`: the fleet's reviewer, one account for every project; its conf is
