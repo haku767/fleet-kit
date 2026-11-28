@@ -41,10 +41,10 @@ name=$me   # the bot's name in the fleet register (Agent: trailer, signatures, s
 # conf` renders it from fleet.toml, root:root 0644; since stage 2, 2026-10-28; the case blocks
 # that held the same went with stage 3). The file is a fence like this script: it is sourced
 # only when root owns it and nobody else can write it or its directory, since the allow list is in it.
-conf_ok() {   # conf_ok <file>: root's, not writable by group or others, same for its directory
+conf_ok() {   # conf_ok <file>: root's, not writable by group or others, same for its directory (symlinks followed: on NixOS /etc/fleet/bots points into the store)
   for f in "$1" "${1%/*}"; do
-    [ "$(stat -c %u "$f" 2>/dev/null)" = 0 ] || return 1
-    case $(stat -c %A "$f") in ?????w*|????????w*) return 1 ;; esac
+    [ "$(stat -L -c %u "$f" 2>/dev/null)" = 0 ] || return 1
+    case $(stat -L -c %A "$f") in ?????w*|????????w*) return 1 ;; esac
   done
 }
 conf=/etc/fleet/bots/$me.conf
